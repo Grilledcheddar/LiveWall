@@ -1,0 +1,207 @@
+import { Focus, Maximize, Minimize, Radio, X } from 'lucide-react';
+import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import GridLayout from 'react-grid-layout';
+import { PlayerTile } from '../components/PlayerTile';
+import { useWall } from '../hooks/useWall';
+import {
+  automaticGrid,
+  normalizeAppearance,
+  normalizeOverlayMode,
+  orderedTiles,
+} from '../lib/state';
+
+export function WallPage() {
+  const { state, save, connected, lastCommand, reportHealth, reportResumePosition, stateError } =
+    useWall();
+  const tiles = useMemo(() => orderedTiles(state.tiles), [state.tiles]);
+  const appearance = normalizeAppearance(state.appearance);
+  const overlayMode = normalizeOverlayMode(state.overlayMode);
+  const grid = automaticGrid(tiles.length);
+  const [controlsVisible, setControlsVisible] = useState(true);
+  const [fullscreen, setFullscreen] = useState(Boolean(document.fullscreenElement));
+  const [fullscreenError, setFullscreenError] = useState('');
+  const kioskLaunch = new URLSearchParams(window.location.search).get('launchMode') === 'kiosk';
+  const hideTimer = useRef<number | undefined>(undefined);
+
+  const revealControls = useCallback(() => {
+    setControlsVisible(true);
+    clearTimeout(hideTimer.current);
+    hideTimer.current = window.setTimeout(() => setControlsVisible(false), 2_400);
+  }, []);
+
+  useEffect(() => {
+    const updateFullscreen = () => {
+      setFullscreen(Boolean(document.fullscreenElement));
+      revealControls();
+    };
+    window.addEventListener('mousemove', revealControls, { passive: true });
+    window.addEventListener('pointermove', revealControls, { passive: true });
+    document.addEventListener('fullscreenchange', updateFullscreen);
+    hideTimer.current = window.setTimeout(() => setControlsVisible(false), 2_400);
+    return () => {
+      clearTimeout(hideTimer.current);
+      window.removeEventListener('mousemove', revealControls);
+      window.removeEventListener('pointermove', revealControls);
+      document.removeEventListener('fullscreenchange', updateFullscreen);
+    };
+  }, [revealControls]);
+
+  useEffect(() => {
+    const escapeFocus = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && state.focusedTileId && !document.fullscreenElement) {
+        void save((current) => ({ ...current, focusedTileId: undefined }));
+      }
+    };
+    document.addEventListener('keydown', escapeFocus);
+    return () => document.removeEventListener('keydown', escapeFocus);
+  }, [save, state.focusedTileId]);
+
+  async function toggleFullscreen() {
+    setFullscreenError('');
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await document.documentElement.requestFullscreen();
+    } catch {
+      setFullscreenError(
+        'Fullscreen was blocked by the browser. Click the Wall and try again, or press F11.',
+      );
+      revealControls();
+    }
+  }
+
+  return (
+    <main
+      className={`wall ${tiles.length ? '' : 'empty-wall'} ${state.focusedTileId ? 'focus-mode' : ''}`}
+      style={
+        {
+          '--wall-background': appearance.backgroundColor,
+          '--wall-gap': `${appearance.gap}px`,
+          '--tile-border': appearance.borderVisible
+            ? `${appearance.borderWidth}px solid ${appearance.borderColor}`
+            : '0 solid transparent',
+          '--tile-radius': `${appearance.cornerRadius}px`,
+        } as CSSProperties
+      }
+    >
+      <div className={`wall-controls ${controlsVisible ? 'visible' : ''}`}>
+        {!kioskLaunch && (
+          <button
+            className="fullscreen-button"
+            onClick={() => void toggleFullscreen()}
+            aria-label={fullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
+          >
+            {fullscreen ? <Minimize size={17} /> : <Maximize size={17} />}
+            <span>{fullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}</span>
+          </button>
+        )}
+        {state.focusedTileId && (
+          <button
+            className="fullscreen-button"
+            onClick={() => void save((current) => ({ ...current, focusedTileId: undefined }))}
+          >
+            <X size={17} /> <span>Exit Focus</span>
+          </button>
+        )}
+      </div>
+      <div className={`wall-connection ${connected ? 'online' : ''}`}>
+        {connected ? 'Live' : 'Reconnecting'}
+      </div>
+      {stateError && (
+        <div className="state-error wall-state-error" role="alert">
+          {stateError}
+        </div>
+      )}
+      {!kioskLaunch && fullscreenError && (
+        <div className="fullscreen-error" role="status">
+          {fullscreenError}
+        </div>
+      )}
+      {!tiles.length ? (
+        <div className="empty-wall-content">
+          <div className="wall-brand">
+            <Radio />
+            <span>LIVEWALL</span>
+          </div>
+          <h1>Your wall is ready.</h1>
+          <p>Add a source from the Admin window. It will appear here automatically.</p>
+          <a href="/admin">Open Admin</a>
+        </div>
+      ) : state.layoutMode === 'automatic' ? (
+        <section
+          className="auto-wall"
+          style={{
+            gridTemplateColumns: `repeat(${grid.columns}, 1fr)`,
+            gridTemplateRows: `repeat(${grid.rows}, 1fr)`,
+          }}
+        >
+          {tiles.map((tile) => (
+            <div
+              key={tile.id}
+              className={`wall-tile-host ${state.focusedTileId === tile.id ? 'focused' : 'unfocused'}`}
+            >
+              <PlayerTile
+                tile={tile}
+                command={lastCommand}
+                stopped={state.globallyStopped}
+                overlayMode={overlayMode}
+                focused={state.focusedTileId === tile.id}
+                activeAudio={state.activeAudioTileId === tile.id}
+                onHealth={reportHealth}
+                onResumePosition={reportResumePosition}
+              />
+              <button
+                className="tile-focus-button"
+                aria-label={`Focus ${tile.name}`}
+                onClick={() => void save((current) => ({ ...current, focusedTileId: tile.id }))}
+              >
+                <Focus size={15} />
+              </button>
+            </div>
+          ))}
+        </section>
+      ) : (
+        <GridLayout
+          className="freeform-wall"
+          layout={tiles.map((tile) => ({
+            i: tile.id,
+            x: tile.x,
+            y: tile.y,
+            w: tile.w,
+            h: tile.h,
+          }))}
+          cols={12}
+          rowHeight={window.innerHeight / 12}
+          width={window.innerWidth}
+          margin={[appearance.gap, appearance.gap]}
+          isDraggable={false}
+          isResizable={false}
+        >
+          {tiles.map((tile) => (
+            <div
+              key={tile.id}
+              className={`wall-tile-host ${state.focusedTileId === tile.id ? 'focused' : 'unfocused'}`}
+            >
+              <PlayerTile
+                tile={tile}
+                command={lastCommand}
+                stopped={state.globallyStopped}
+                overlayMode={overlayMode}
+                focused={state.focusedTileId === tile.id}
+                activeAudio={state.activeAudioTileId === tile.id}
+                onHealth={reportHealth}
+                onResumePosition={reportResumePosition}
+              />
+              <button
+                className="tile-focus-button"
+                aria-label={`Focus ${tile.name}`}
+                onClick={() => void save((current) => ({ ...current, focusedTileId: tile.id }))}
+              >
+                <Focus size={15} />
+              </button>
+            </div>
+          ))}
+        </GridLayout>
+      )}
+    </main>
+  );
+}

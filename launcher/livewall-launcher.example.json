@@ -1,0 +1,8 @@
+{
+  "wallDisplay": "\\\\.\\DISPLAY2",
+  "adminDisplay": "\\\\.\\DISPLAY1",
+  "wallMode": "kiosk",
+  "browser": "chrome",
+  "port": 4174,
+  "startupTimeoutSeconds": 30
+}

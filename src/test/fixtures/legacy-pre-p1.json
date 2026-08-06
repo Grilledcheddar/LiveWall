@@ -1,0 +1,40 @@
+{
+  "version": 150,
+  "updatedAt": 1786029381552,
+  "layoutMode": "automatic",
+  "tiles": [
+    {
+      "id": "3805b13c-157b-445c-9e40-72ffacbfe1a0",
+      "name": "LIVE Brooks Falls - Katmai National Park, Alaska",
+      "source": {
+        "url": "https://www.youtube.com/watch?v=rqHW2HhgGQ0",
+        "type": "youtube",
+        "youtubeId": "rqHW2HhgGQ0"
+      },
+      "x": 0,
+      "y": null,
+      "w": 4,
+      "h": 4,
+      "muted": true,
+      "volume": 76,
+      "titleMode": "manual"
+    },
+    {
+      "id": "45d70e54-688f-48b8-815d-7ea02f1e37ee",
+      "name": "Yall Bot",
+      "source": {
+        "url": "https://www.youtube.com/watch?v=2dQbAfdnekc",
+        "type": "youtube",
+        "youtubeId": "2dQbAfdnekc"
+      },
+      "x": 0,
+      "y": null,
+      "w": 4,
+      "h": 4,
+      "muted": true,
+      "volume": 61,
+      "titleMode": "manual"
+    }
+  ],
+  "activeAudioTileId": "45d70e54-688f-48b8-815d-7ea02f1e37ee"
+}

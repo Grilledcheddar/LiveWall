@@ -1,0 +1,85 @@
+# Dependencies
+node_modules/
+
+# Generated builds
+dist/
+dist-server/
+build/
+out/
+.vite/
+*.tsbuildinfo
+
+# Test and coverage output
+coverage/
+test-results/
+playwright-report/
+blob-report/
+.nyc_output/
+
+# Runtime application state
+data/
+runtime/
+tmp/
+temp/
+*.tmp
+*.pid
+*.lock
+
+# LiveWall saved content and backups
+**/backups/
+**/wall-state*.json
+**/source-library*.json
+**/launcher-runtime*.json
+
+# Local launcher configuration
+launcher/livewall-launcher.json
+
+# Dedicated browser profiles and browser data
+**/chrome-wall-profile/
+**/chrome-admin-profile/
+**/edge-wall-profile/
+**/edge-admin-profile/
+**/browser-profiles/
+**/User Data/
+**/Default/
+**/Cookies
+**/History
+**/Login Data
+**/Local State
+**/Web Data
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+*.crt
+*.cer
+*.token
+*credentials*
+*secrets*
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Editor and operating-system files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# PowerShell and launcher temporary output
+*.clixml
+*.transcript
+launcher/runtime/
+launcher/logs/
