@@ -99,6 +99,17 @@ function normalizeVideoSource(value: unknown, label: string): VideoSource {
     type: type as VideoSource['type'],
     youtubeId: type === 'youtube' ? String(value.youtubeId) : undefined,
     playlistId: type === 'youtube-playlist' ? String(value.playlistId) : undefined,
+    playlistStartVideoId:
+      type === 'youtube-playlist' && typeof value.playlistStartVideoId === 'string'
+        ? value.playlistStartVideoId
+        : undefined,
+    playlistStartIndex:
+      type === 'youtube-playlist' &&
+      typeof value.playlistStartIndex === 'number' &&
+      Number.isSafeInteger(value.playlistStartIndex) &&
+      value.playlistStartIndex >= 0
+        ? value.playlistStartIndex
+        : undefined,
   };
 }
 

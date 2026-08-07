@@ -62,6 +62,71 @@ describe('PlayerTile lifecycle', () => {
     expect(view.container.querySelector('.player-tile')).toBeVisible();
   });
 
+  it('switches active audio without pausing, seeking, or remounting either player', () => {
+    const first = { ...newTile('First', source('first&position=17')), muted: true };
+    const second = { ...newTile('Second', source('second&position=29')), muted: true };
+    const view = render(
+      <>
+        <PlayerTile tile={first} />
+        <PlayerTile tile={second} />
+      </>,
+    );
+    const players = Array.from(view.container.querySelectorAll('.mock-player')) as HTMLElement[];
+    const positions = players.map((player) => player.dataset.position);
+    const renderCommand = (
+      firstTile: typeof first,
+      secondTile: typeof second,
+      command: PlayerCommand,
+    ) =>
+      view.rerender(
+        <>
+          <PlayerTile tile={firstTile} command={command} />
+          <PlayerTile tile={secondTile} command={command} />
+        </>,
+      );
+    const activeFirst = { ...first, muted: false };
+    renderCommand(activeFirst, second, {
+      id: 'unmute-first',
+      tileId: first.id,
+      command: 'unmute',
+      sentAt: 1,
+    });
+    renderCommand(activeFirst, second, {
+      id: 'pause-first',
+      tileId: first.id,
+      command: 'pause',
+      sentAt: 2,
+    });
+    expect(players[0].dataset.playing).toBe('false');
+    renderCommand(activeFirst, second, {
+      id: 'play-first',
+      tileId: first.id,
+      command: 'play',
+      sentAt: 3,
+    });
+    expect(players[0].dataset.playing).toBe('true');
+    const activeSecond = { ...second, muted: false };
+    renderCommand(first, activeSecond, {
+      id: 'mute-first',
+      tileId: first.id,
+      command: 'mute',
+      sentAt: 4,
+    });
+    renderCommand(first, activeSecond, {
+      id: 'unmute-second',
+      tileId: second.id,
+      command: 'unmute',
+      sentAt: 5,
+    });
+    const after = Array.from(view.container.querySelectorAll('.mock-player')) as HTMLElement[];
+    expect(after).toEqual(players);
+    expect(after[0].dataset.playing).toBe('true');
+    expect(after[1].dataset.playing).toBe('true');
+    expect(after.map((player) => player.dataset.position)).toEqual(positions);
+    expect(after[0].dataset.muted).toBe('true');
+    expect(after[1].dataset.muted).toBe('false');
+  });
+
   it('unloads on Stop All and intentionally remounts on resume', () => {
     const tile = newTile('Stop', source('stop'));
     const onResumePosition = vi.fn();
@@ -186,6 +251,142 @@ describe('PlayerTile lifecycle', () => {
     expect(playVideo).toHaveBeenCalled();
   });
 
+  it('mounts a playlist without videoId and explicitly loads its canonical playlist', async () => {
+    const loadPlaylist = vi.fn();
+    let options: any;
+    window.YT = {
+      Player: class {
+        constructor(_node: HTMLElement, nextOptions: any) {
+          options = nextOptions;
+          queueMicrotask(() => nextOptions.events.onReady());
+        }
+        loadPlaylist = loadPlaylist;
+        playVideo = vi.fn();
+        pauseVideo = vi.fn();
+        seekTo = vi.fn();
+        mute = vi.fn();
+        unMute = vi.fn();
+        isMuted = () => true;
+        setVolume = vi.fn();
+        getCurrentTime = () => 0;
+        getDuration = () => 120;
+        getVideoData = () => ({});
+        getPlaylist = () => ['one', 'two'];
+        getPlaylistIndex = () => 0;
+        previousVideo = vi.fn();
+        nextVideo = vi.fn();
+        stopVideo = vi.fn();
+        destroy = vi.fn();
+      },
+    };
+    const tile = newTile('Playlist', {
+      type: 'youtube-playlist',
+      url: 'https://www.youtube.com/playlist?list=PL1234567890abcdef',
+      playlistId: 'PL1234567890abcdef',
+      playlistStartIndex: 2,
+    });
+    render(<PlayerTile tile={tile} />);
+    await waitFor(() => expect(loadPlaylist).toHaveBeenCalledOnce());
+    expect(options).not.toHaveProperty('videoId');
+    expect(options.playerVars).not.toHaveProperty('list');
+    expect(loadPlaylist).toHaveBeenCalledWith(
+      expect.objectContaining({
+        listType: 'playlist',
+        list: 'PL1234567890abcdef',
+        index: 2,
+      }),
+    );
+  });
+
+  it('retains pre-ready playlist commands and applies them in order', async () => {
+    const calls: string[] = [];
+    let onReady: (() => void) | undefined;
+    window.YT = {
+      Player: class {
+        constructor(_node: HTMLElement, options: any) {
+          onReady = options.events.onReady;
+        }
+        loadPlaylist = () => calls.push('loadPlaylist');
+        playVideo = () => calls.push('play');
+        pauseVideo = () => calls.push('pause');
+        seekTo = () => calls.push('seek');
+        mute = () => calls.push('mute');
+        unMute = () => calls.push('unmute');
+        isMuted = () => false;
+        setVolume = () => calls.push('volume');
+        getCurrentTime = () => 0;
+        getDuration = () => 120;
+        getVideoData = () => ({});
+        getPlaylist = () => ['one', 'two'];
+        getPlaylistIndex = () => 0;
+        previousVideo = () => calls.push('previous');
+        nextVideo = () => calls.push('next');
+        stopVideo = vi.fn();
+        destroy = vi.fn();
+      },
+    };
+    const tile = newTile('Playlist', {
+      type: 'youtube-playlist',
+      url: 'https://www.youtube.com/playlist?list=PL1234567890abcdef',
+      playlistId: 'PL1234567890abcdef',
+    });
+    const view = render(<PlayerTile tile={tile} />);
+    await waitFor(() => expect(onReady).not.toBe(undefined));
+    for (const [id, command, value] of [
+      ['play', 'play'],
+      ['pause', 'pause'],
+      ['unmute', 'unmute'],
+      ['volume', 'volume', 42],
+      ['next', 'next'],
+    ] as const) {
+      view.rerender(
+        <PlayerTile
+          tile={tile}
+          command={{ id, tileId: tile.id, command, value, sentAt: calls.length }}
+        />,
+      );
+    }
+    act(() => onReady?.());
+    await waitFor(() => expect(calls).toContain('next'));
+    expect(calls.indexOf('loadPlaylist')).toBeLessThan(calls.indexOf('play'));
+    expect(
+      calls.filter((call) => ['play', 'pause', 'unmute', 'volume', 'next'].includes(call)),
+    ).toEqual(['volume', 'unmute', 'play', 'pause', 'unmute', 'volume', 'next']);
+  });
+
+  it('fails playlist readiness after a bounded timeout and can retry', async () => {
+    vi.useFakeTimers();
+    let mounts = 0;
+    window.YT = {
+      Player: class {
+        constructor() {
+          mounts += 1;
+        }
+        destroy = vi.fn();
+      },
+    };
+    const tile = newTile('Playlist', {
+      type: 'youtube-playlist',
+      url: 'https://www.youtube.com/playlist?list=PL1234567890abcdef',
+      playlistId: 'PL1234567890abcdef',
+    });
+    const view = render(<PlayerTile tile={tile} />);
+    await act(async () => Promise.resolve());
+    expect(mounts).toBe(1);
+    act(() => vi.advanceTimersByTime(12_000));
+    expect(view.container.querySelector('.player-tile')).toHaveAttribute('data-health', 'failed');
+    expect(view.container).toHaveTextContent('Select Retry now');
+    view.rerender(
+      <PlayerTile
+        tile={tile}
+        command={{ id: 'retry', tileId: tile.id, command: 'retry', sentAt: 1 }}
+      />,
+    );
+    await act(async () => Promise.resolve());
+    expect(mounts).toBe(2);
+    vi.useRealTimers();
+  });
+
   it('uses the safe end of the mocked HLS seekable range as live edge', () => {
     vi.spyOn(HTMLMediaElement.prototype, 'canPlayType').mockReturnValue('probably');
     vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue();
@@ -205,6 +406,31 @@ describe('PlayerTile lifecycle', () => {
     };
     const view = render(<PlayerTile tile={tile} />);
     expect((view.container.querySelector('video') as HTMLVideoElement).currentTime).toBe(98);
+  });
+
+  it('reports rejected unmuted play and clears the lock after Wall activation retries it', async () => {
+    const tile = {
+      ...newTile('Audio', source('audio&rejectPlay=1')),
+      muted: false,
+    };
+    const health: PlayerHealth[] = [];
+    const onHealth = (item: PlayerHealth) => health.push(item);
+    const view = render(<PlayerTile tile={tile} onHealth={onHealth} />);
+    view.rerender(
+      <PlayerTile
+        tile={tile}
+        onHealth={onHealth}
+        command={{ id: 'play', tileId: tile.id, command: 'play', sentAt: 1 }}
+      />,
+    );
+    await waitFor(() =>
+      expect(health.some((item) => item.audioActivationRequired === true)).toBe(true),
+    );
+    act(() => window.dispatchEvent(new Event('livewall-enable-audio')));
+    await waitFor(() => expect(health.at(-1)?.audioActivationRequired).toBe(false), {
+      timeout: 1_500,
+    });
+    expect(view.container.querySelector('.mock-player')).toHaveAttribute('data-playing', 'true');
   });
 
   it('restores a playlist index, advances sequentially, and stops at the final item', () => {

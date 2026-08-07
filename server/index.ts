@@ -207,6 +207,7 @@ const broadcast = (message: ServerMessage) => {
   const payload = JSON.stringify(message);
   wss.clients.forEach((client) => client.readyState === WebSocket.OPEN && client.send(payload));
 };
+const latestHealthByTile = new Map<string, PlayerHealth>();
 
 app.put('/api/state', async (req, res) => {
   if (stateLoadError) return res.status(503).json({ message: stateLoadError });
@@ -311,8 +312,14 @@ app.post('/api/player-health', (req, res) => {
   if (!health?.tileId || !health?.sourceUrl || !health?.status) {
     return res.status(400).json({ message: 'The player health event was not valid.' });
   }
+  latestHealthByTile.set(health.tileId, health);
   broadcast({ type: 'health', health });
   res.status(202).json({ ok: true });
+});
+
+app.get('/api/player-health', (_req, res) => {
+  const activeTileIds = new Set(store.get().tiles.map((tile) => tile.id));
+  res.json([...latestHealthByTile.values()].filter((health) => activeTileIds.has(health.tileId)));
 });
 
 app.post('/api/resume-position', async (req, res) => {
@@ -334,6 +341,13 @@ wss.on('connection', (socket) => {
     ? { type: 'error', message: stateLoadError }
     : { type: 'hello', state: store.get() };
   socket.send(JSON.stringify(message));
+  if (!stateLoadError) {
+    const activeTileIds = new Set(store.get().tiles.map((tile) => tile.id));
+    latestHealthByTile.forEach((health) => {
+      if (activeTileIds.has(health.tileId))
+        socket.send(JSON.stringify({ type: 'health', health } satisfies ServerMessage));
+    });
+  }
 });
 
 const dist = path.join(root, 'dist');

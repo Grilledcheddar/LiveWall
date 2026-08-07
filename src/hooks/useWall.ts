@@ -21,6 +21,7 @@ export function useWall() {
   const stateRef = useRef<WallState>(state);
   const [connected, setConnected] = useState(false);
   const [lastCommand, setLastCommand] = useState<PlayerCommand>();
+  const [commands, setCommands] = useState<PlayerCommand[]>([]);
   const [healthByTile, setHealthByTile] = useState<Record<string, PlayerHealth>>({});
   const [stateError, setStateError] = useState('');
   const [progress, setProgress] = useState<PlaybackProgressFile>(() =>
@@ -45,6 +46,10 @@ export function useWall() {
       return undefined;
     }
   }, []);
+  const acceptCommand = useCallback((command: PlayerCommand) => {
+    setLastCommand(command);
+    setCommands((current) => [...current, command].slice(-100));
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -52,7 +57,7 @@ export function useWall() {
     channel.current = bc;
     bc.onmessage = (event: MessageEvent<ServerMessage>) => {
       if (event.data.type === 'state' || event.data.type === 'hello') acceptState(event.data.state);
-      if (event.data.type === 'command') setLastCommand(event.data.command);
+      if (event.data.type === 'command') acceptCommand(event.data.command);
       if (event.data.type === 'health') {
         const health = event.data.health;
         setHealthByTile((current) => ({ ...current, [health.tileId]: health }));
@@ -112,7 +117,7 @@ export function useWall() {
           acceptState(message.state);
           bc.postMessage(message);
         } else if (message.type === 'command') {
-          setLastCommand(message.command);
+          acceptCommand(message.command);
           bc.postMessage(message);
         } else if (message.type === 'health') {
           setHealthByTile((current) => ({ ...current, [message.health.tileId]: message.health }));
@@ -129,7 +134,7 @@ export function useWall() {
       socket?.close();
       bc.close();
     };
-  }, [acceptState]);
+  }, [acceptCommand, acceptState]);
 
   const save = useCallback(
     async (next: WallState | ((current: WallState) => WallState)) => {
@@ -266,6 +271,7 @@ export function useWall() {
     connected,
     command,
     lastCommand,
+    commands,
     healthByTile,
     reportHealth,
     progress,

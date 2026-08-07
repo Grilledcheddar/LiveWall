@@ -38,6 +38,25 @@ Describe 'LiveWall launcher configuration initialization' {
     (Initialize-LiveWallLauncherConfig -ConfigPath $local) | Should Be $false
     (Get-Content -LiteralPath $local -Raw) | Should Be $before
   }
+
+  It 'adds the Wall autoplay setting atomically to a legacy local configuration' {
+    $local = Join-Path $TestDrive 'legacy-launcher.json'
+    '{"port":4174,"browser":"chrome"}' | Set-Content -LiteralPath $local -Encoding UTF8
+    (Update-LiveWallLauncherConfig -ConfigPath $local) | Should Be $true
+    $config = Get-Content -LiteralPath $local -Raw | ConvertFrom-Json
+    $config.port | Should Be 4174
+    $config.browser | Should Be 'chrome'
+    $config.wallAutoplayWithSound | Should Be $true
+    (Test-Path -LiteralPath "$local.tmp") | Should Be $false
+  }
+
+  It 'preserves an existing Wall autoplay choice on warm runs' {
+    $local = Join-Path $TestDrive 'warm-launcher.json'
+    '{"port":4174,"wallAutoplayWithSound":false}' | Set-Content -LiteralPath $local -Encoding UTF8
+    $before = Get-Content -LiteralPath $local -Raw
+    (Update-LiveWallLauncherConfig -ConfigPath $local) | Should Be $false
+    (Get-Content -LiteralPath $local -Raw) | Should Be $before
+  }
 }
 
 Describe 'LiveWall display selection' {
@@ -88,9 +107,24 @@ Describe 'LiveWall browser discovery and arguments' {
     ($admin -contains '--window-size=1920,1040') | Should Be $true
     ($admin -contains '--user-data-dir="C:\LiveWall Data\admin"') | Should Be $true
   }
+
+  It 'applies autoplay-with-sound only to the dedicated Wall arguments' {
+    $screen = New-TestScreen '\\.\DISPLAY2' $false 0 0 1920 1080 0 0 1920 1040
+    $wall = New-LiveWallWallArguments -Screen $screen -ProfilePath 'C:\LiveWall\wall' `
+      -Url 'http://127.0.0.1:4174/wall' -AutoplayWithSound $true
+    $admin = New-LiveWallAdminArguments -Screen $screen -ProfilePath 'C:\LiveWall\admin' `
+      -Url 'http://127.0.0.1:4174/admin'
+    ($wall -contains '--autoplay-policy=no-user-gesture-required') | Should Be $true
+    ($admin -contains '--autoplay-policy=no-user-gesture-required') | Should Be $false
+  }
 }
 
 Describe 'LiveWall server readiness' {
+  It 'accepts every P3 layout mode in the installed health contract' {
+    $moduleSource = Get-Content -LiteralPath $modulePath -Raw
+    $moduleSource | Should Match "'automatic', 'freeform', 'template'"
+  }
+
   It 'reuses an existing healthy LiveWall server' {
     $status = Get-LiveWallServerStatus -Port 4174 -PortProbe { $true } -EndpointProbe {
       [pscustomobject]@{ IsLiveWall = $true; Healthy = $true; Message = 'ready' }

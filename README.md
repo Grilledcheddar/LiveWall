@@ -18,6 +18,7 @@ Launcher settings are in the local, untracked `launcher\livewall-launcher.json`.
 - `wallDisplay` and `adminDisplay` are stable Windows display identities, not screen-list positions. The launcher logs the identity and DPI-aware bounds of every detected display. If a configured display is absent, it reports that fact and safely uses the primary display.
 - `wallMode` is `kiosk` by default.
 - `browser` is `chrome`. Chrome is searched in its standard machine-wide and per-user locations; Microsoft Edge is the documented fallback when Chrome is unavailable.
+- `wallAutoplayWithSound` defaults to `true`. It adds Chromium's `--autoplay-policy=no-user-gesture-required` flag only to the isolated, launcher-owned Wall process so Admin audio commands can work before anyone clicks the separate Wall window. It is never added to Admin, personal profiles, registry policy, or unrelated browser processes. If local browser policy still rejects sound, LiveWall reports **Wall audio needs activation** and shows a one-time **Enable Audio** button on Wall.
 - `port` defaults to `4174`, and `startupTimeoutSeconds` bounds the readiness wait.
 
 Unusual mixed-DPI arrangements are handled using Windows per-monitor DPI awareness and the reported display bounds, including negative coordinates. Windows or browser policies can still constrain final window placement; check `data\launcher\launcher.log` for the exact detected mapping and bounds.
@@ -53,7 +54,7 @@ LiveWall only listens on `127.0.0.1`. Other computers on the network cannot conn
 
 Volume changes are sent directly to the selected player while the slider moves and saved after a short debounce. They do not reload the Wall or recreate players.
 
-The Wall starts remote players muted because Chrome and Edge generally block autoplay with sound. If a provider still asks for interaction, click its player once.
+The Wall initially starts remote players muted. Selecting **Active audio** unmutes only that player and never pauses, restarts, seeks, or remounts any tile. The dedicated Wall launcher permits autoplay with sound; if a provider or machine policy still blocks it, use the one-time **Enable Audio** overlay on Wall. Admin does not claim success until Wall reports the actual player state.
 
 ## Supported sources
 

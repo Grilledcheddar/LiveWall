@@ -3,6 +3,7 @@
   "adminDisplay": "\\\\.\\DISPLAY1",
   "wallMode": "kiosk",
   "browser": "chrome",
+  "wallAutoplayWithSound": true,
   "port": 4174,
   "startupTimeoutSeconds": 30
 }

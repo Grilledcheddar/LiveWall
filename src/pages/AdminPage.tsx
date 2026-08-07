@@ -665,7 +665,13 @@ function TileCard({
           onClick={() => onCommand(tile.muted ? 'unmute' : 'mute')}
         >
           {tile.muted ? <VolumeX size={17} /> : <Volume2 size={17} />}
-          {isActiveAudio ? 'Active audio' : tile.muted ? 'Muted' : 'Audible'}
+          {health?.audioActivationRequired
+            ? 'Wall audio needs activation'
+            : isActiveAudio
+              ? 'Active audio'
+              : tile.muted
+                ? 'Muted'
+                : 'Audible'}
         </button>
         <input
           aria-label={`Volume for ${tile.name}`}

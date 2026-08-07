@@ -16,6 +16,17 @@ function Initialize-LiveWallLauncherConfig {
   $true
 }
 
+function Update-LiveWallLauncherConfig {
+  param([Parameter(Mandatory = $true)][string]$ConfigPath)
+  $config = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
+  if ($config.PSObject.Properties.Name -contains 'wallAutoplayWithSound') { return $false }
+  $config | Add-Member -NotePropertyName wallAutoplayWithSound -NotePropertyValue $true
+  $tempPath = "$ConfigPath.tmp"
+  $config | ConvertTo-Json | Set-Content -LiteralPath $tempPath -Encoding UTF8
+  Move-Item -LiteralPath $tempPath -Destination $ConfigPath -Force
+  $true
+}
+
 function Set-LiveWallDpiAwareness {
   try {
     if (-not ('LiveWall.NativeMethods' -as [type])) {
@@ -114,7 +125,8 @@ function New-LiveWallWallArguments {
     [Parameter(Mandatory = $true)]$Screen,
     [Parameter(Mandatory = $true)][string]$ProfilePath,
     [Parameter(Mandatory = $true)][string]$Url,
-    [string]$Mode = 'kiosk'
+    [string]$Mode = 'kiosk',
+    [bool]$AutoplayWithSound = $false
   )
   $arguments = @(
     "--user-data-dir=`"$ProfilePath`"",
@@ -125,6 +137,7 @@ function New-LiveWallWallArguments {
     "--window-size=$($Screen.Bounds.Width),$($Screen.Bounds.Height)"
   )
   if ($Mode -eq 'kiosk') { $arguments += '--kiosk' }
+  if ($AutoplayWithSound) { $arguments += '--autoplay-policy=no-user-gesture-required' }
   $arguments + $Url
 }
 
@@ -173,7 +186,7 @@ function Test-LiveWallEndpoint {
       return [pscustomobject]@{ IsLiveWall = $true; Healthy = $false; Message = [string]$health.stateError }
     }
     $state = Invoke-RestMethod "$BaseUrl/api/state" -TimeoutSec 2
-    $validLayout = $state.layoutMode -in @('automatic', 'freeform')
+    $validLayout = $state.layoutMode -in @('automatic', 'freeform', 'template')
     $hasTiles = $null -ne $state.tiles
     [pscustomobject]@{
       IsLiveWall = ($validLayout -and $hasTiles)
@@ -305,6 +318,7 @@ function Get-LiveWallWallContext {
   param([Parameter(Mandatory = $true)][string]$Root)
   $configPath = Join-Path $Root 'launcher\livewall-launcher.json'
   [void](Initialize-LiveWallLauncherConfig -ConfigPath $configPath)
+  [void](Update-LiveWallLauncherConfig -ConfigPath $configPath)
   $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
   $browser = Find-LiveWallBrowser -Preferred ([string]$config.browser)
   $profile = Join-Path $Root 'data\launcher\browser-profiles\wall'
@@ -365,7 +379,8 @@ function Open-LiveWallDedicatedWall {
     }
   }
   $arguments = New-LiveWallWallArguments -Screen $selection.Screen -ProfilePath $context.ProfilePath `
-    -Url $context.Url -Mode ([string]$context.Config.wallMode)
+    -Url $context.Url -Mode ([string]$context.Config.wallMode) `
+    -AutoplayWithSound ([bool]$context.Config.wallAutoplayWithSound)
   $process = Start-Process -FilePath $context.Browser.Path -ArgumentList $arguments -PassThru
   [void](Save-LiveWallWallSession -Root $Root -ProcessId $process.Id -BrowserPath $context.Browser.Path `
       -ProfilePath $context.ProfilePath -Url $context.Url -Mode ([string]$context.Config.wallMode))

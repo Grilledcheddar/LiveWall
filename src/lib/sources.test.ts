@@ -3,6 +3,7 @@ import {
   canonicalSourceUrl,
   detectSource,
   parseYouTubeId,
+  parseYouTubePlaylist,
   parseYouTubePlaylistId,
 } from './sources';
 
@@ -23,13 +24,27 @@ describe('YouTube playlist parsing', () => {
   it.each([
     [`https://www.youtube.com/playlist?list=${id}`, id],
     [`https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=${id}`, id],
+    [`https://youtu.be/dQw4w9WgXcQ?list=${id}`, id],
     [id, id],
   ])('parses %s', (value, expected) => expect(parseYouTubePlaylistId(value)).toBe(expected));
 
   it('detects and canonicalizes playlists as a distinct source type', () => {
     const source = detectSource(`https://youtube.com/watch?v=dQw4w9WgXcQ&list=${id}&index=2`);
-    expect(source).toMatchObject({ type: 'youtube-playlist', playlistId: id });
+    expect(source).toMatchObject({
+      type: 'youtube-playlist',
+      playlistId: id,
+      playlistStartVideoId: 'dQw4w9WgXcQ',
+      playlistStartIndex: 1,
+    });
     expect(canonicalSourceUrl(source)).toBe(`https://www.youtube.com/playlist?list=${id}`);
+  });
+
+  it('retains an optional starting video and zero-based starting index', () => {
+    expect(parseYouTubePlaylist(`https://youtu.be/dQw4w9WgXcQ?list=${id}&index=4`)).toEqual({
+      playlistId: id,
+      startingVideoId: 'dQw4w9WgXcQ',
+      startingIndex: 3,
+    });
   });
 });
 

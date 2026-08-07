@@ -1441,6 +1441,44 @@ a {
   text-align: center;
 }
 
+.audio-activation-overlay {
+  position: fixed;
+  z-index: 2147483647;
+  left: 50%;
+  top: 50%;
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  min-width: min(320px, calc(100vw - 32px));
+  padding: 20px 26px;
+  transform: translate(-50%, -50%);
+  border: 1px solid #b9f34a;
+  border-radius: 12px;
+  background: #0b1017f2;
+  color: #f5f8fb;
+  box-shadow: 0 16px 60px #000c;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.audio-activation-overlay strong {
+  color: var(--lime);
+  font-size: 18px;
+}
+.audio-activation-overlay span {
+  color: #c6d0db;
+  font-size: 12px;
+}
+.audio-activation-overlay:hover {
+  background: #151d27f7;
+}
+button.audio-activation-overlay:not(:disabled):active {
+  transform: translate(-50%, -50%) scale(0.99);
+}
+.audio-activation-overlay:focus-visible {
+  outline: 3px solid #fff;
+  outline-offset: 3px;
+}
+
 .source-library {
   margin: 22px 0;
   padding: 22px;

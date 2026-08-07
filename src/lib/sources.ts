@@ -34,13 +34,37 @@ export function parseYouTubePlaylistId(input: string): string | undefined {
   }
 }
 
-export function detectSource(input: string): VideoSource {
-  const rawPlaylistId = parseYouTubePlaylistId(input);
-  if (rawPlaylistId && !/^https?:/i.test(input.trim()))
+export function parseYouTubePlaylist(input: string):
+  | {
+      playlistId: string;
+      startingVideoId?: string;
+      startingIndex?: number;
+    }
+  | undefined {
+  const playlistId = parseYouTubePlaylistId(input);
+  if (!playlistId) return undefined;
+  const trimmed = input.trim();
+  if (!/^https?:/i.test(trimmed)) return { playlistId };
+  try {
+    const url = new URL(trimmed);
+    const index = Number(url.searchParams.get('index'));
     return {
-      url: `https://www.youtube.com/playlist?list=${rawPlaylistId}`,
+      playlistId,
+      startingVideoId: parseYouTubeId(trimmed),
+      startingIndex: Number.isSafeInteger(index) && index > 0 ? Math.max(0, index - 1) : undefined,
+    };
+  } catch {
+    return { playlistId };
+  }
+}
+
+export function detectSource(input: string): VideoSource {
+  const playlist = parseYouTubePlaylist(input);
+  if (playlist && !/^https?:/i.test(input.trim()))
+    return {
+      url: `https://www.youtube.com/playlist?list=${playlist.playlistId}`,
       type: 'youtube-playlist',
-      playlistId: rawPlaylistId,
+      playlistId: playlist.playlistId,
     };
   let url: URL;
   try {
@@ -53,12 +77,14 @@ export function detectSource(input: string): VideoSource {
   }
   const normalized = url.toString();
   if (url.hostname === 'mock.livewall.local') return { url: normalized, type: 'mock' };
-  const playlistId = parseYouTubePlaylistId(normalized);
-  if (playlistId)
+  const detectedPlaylist = parseYouTubePlaylist(normalized);
+  if (detectedPlaylist)
     return {
-      url: `https://www.youtube.com/playlist?list=${playlistId}`,
+      url: `https://www.youtube.com/playlist?list=${detectedPlaylist.playlistId}`,
       type: 'youtube-playlist',
-      playlistId,
+      playlistId: detectedPlaylist.playlistId,
+      playlistStartVideoId: detectedPlaylist.startingVideoId,
+      playlistStartIndex: detectedPlaylist.startingIndex,
     };
   const youtubeId = parseYouTubeId(normalized);
   if (youtubeId) return { url: normalized, type: 'youtube', youtubeId };

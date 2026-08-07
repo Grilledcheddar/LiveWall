@@ -24,6 +24,9 @@ try {
   if (Initialize-LiveWallLauncherConfig -ConfigPath $ConfigPath) {
     Write-Host "Created local launcher configuration from launcher\livewall-launcher.example.json."
   }
+  if (Update-LiveWallLauncherConfig -ConfigPath $ConfigPath) {
+    Write-Host 'Added the dedicated Wall autoplay-with-sound setting to the local launcher configuration.'
+  }
   $config = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
   $port = [int]$config.port
   if ($port -lt 1 -or $port -gt 65535) { throw 'The configured port is invalid.' }
@@ -122,7 +125,8 @@ try {
 
     Write-ProgressMessage ("Opening Wall on {0}" -f $wallSelection.Screen.DeviceName)
     $wallArguments = New-LiveWallWallArguments -Screen $wallSelection.Screen -ProfilePath $wallProfile `
-      -Url "$baseUrl/wall?launchMode=$($config.wallMode)" -Mode ([string]$config.wallMode)
+      -Url "$baseUrl/wall?launchMode=$($config.wallMode)" -Mode ([string]$config.wallMode) `
+      -AutoplayWithSound ([bool]$config.wallAutoplayWithSound)
     $wallProcess = Start-Process -FilePath $browser.Path -ArgumentList $wallArguments -PassThru
     [void](Save-LiveWallWallSession -Root $root -ProcessId $wallProcess.Id `
         -BrowserPath $browser.Path -ProfilePath $wallProfile `

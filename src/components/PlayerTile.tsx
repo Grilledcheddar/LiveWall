@@ -12,7 +12,7 @@ import type {
 import { resumeTarget, PROGRESS_INTERVAL_MS } from '../lib/playback';
 
 interface Adapter {
-  play(): void;
+  play(): void | Promise<void>;
   pause(): void;
   seek(seconds: number): void;
   setMuted(muted: boolean): void;
@@ -24,6 +24,7 @@ interface Adapter {
   getPlaylistIndex(): number | undefined;
   previous(): void;
   next(): void;
+  isMuted(): boolean | undefined;
   destroy(): void;
 }
 
@@ -38,18 +39,29 @@ let youtubeReady: Promise<any> | undefined;
 function loadYouTube() {
   if (window.YT?.Player) return Promise.resolve(window.YT);
   if (!youtubeReady) {
-    youtubeReady = new Promise((resolve) => {
+    const request = new Promise<any>((resolve, reject) => {
       const previous = window.onYouTubeIframeAPIReady;
+      const readinessTimeout = window.setTimeout(() => {
+        if (youtubeReady === request) youtubeReady = undefined;
+        reject(new Error('The YouTube IFrame API did not become ready.'));
+      }, 10_000);
       window.onYouTubeIframeAPIReady = () => {
+        clearTimeout(readinessTimeout);
         previous?.();
         resolve(window.YT);
       };
       if (!document.querySelector('script[src*="youtube.com/iframe_api"]')) {
         const script = document.createElement('script');
         script.src = 'https://www.youtube.com/iframe_api';
+        script.onerror = () => {
+          clearTimeout(readinessTimeout);
+          if (youtubeReady === request) youtubeReady = undefined;
+          reject(new Error('The YouTube IFrame API script could not be loaded.'));
+        };
         document.head.appendChild(script);
       }
     });
+    youtubeReady = request;
   }
   return youtubeReady;
 }
@@ -57,6 +69,7 @@ function loadYouTube() {
 export const PlayerTile = memo(function PlayerTile({
   tile,
   command,
+  commands,
   stopped = false,
   overlayMode = 'hover',
   focused = false,
@@ -68,6 +81,7 @@ export const PlayerTile = memo(function PlayerTile({
 }: {
   tile: Tile;
   command?: PlayerCommand;
+  commands?: PlayerCommand[];
   stopped?: boolean;
   overlayMode?: OverlayMode;
   focused?: boolean;
@@ -86,21 +100,26 @@ export const PlayerTile = memo(function PlayerTile({
   const adapter = useRef<Adapter | undefined>(undefined);
   const adapterReady = useRef(false);
   const pendingControls = useRef({ muted: tile.muted, volume: tile.volume });
-  const pendingTransport = useRef<PlayerCommand | undefined>(undefined);
-  const lastCommandId = useRef<string | undefined>(undefined);
+  const pendingCommands = useRef<PlayerCommand[]>([]);
+  const requestedPlayback = useRef<'playing' | 'paused'>('playing');
+  const audioActivationRequired = useRef(false);
+  const audioActivationEpoch = useRef(0);
+  const processedCommandIds = useRef(new Set<string>());
   const retryTimer = useRef<number | undefined>(undefined);
   const retryAttempt = useRef(0);
   const lastReadyAt = useRef<number | undefined>(undefined);
   const sourceKey = `${tile.source.type}:${tile.source.url}`;
   const currentSourceKey = useRef(sourceKey);
   const [retryNonce, setRetryNonce] = useState(0);
-  const [status, setStatus] = useState<PlayerHealthStatus>(stopped ? 'stopped' : 'loading');
+  const [status, setStatus] = useState<PlayerHealthStatus>(stopped ? 'stopped' : 'initializing');
+  const statusRef = useRef<PlayerHealthStatus>(status);
   const [message, setMessage] = useState(
     stopped ? 'Players are stopped.' : 'Connecting to source…',
   );
   const [technicalDetail, setTechnicalDetail] = useState('');
   const [controlMessage, setControlMessage] = useState('');
   const messageTimer = useRef<number | undefined>(undefined);
+  const audioCheckTimer = useRef<number | undefined>(undefined);
   const latestName = useRef(tile.name);
   const liveSource = useRef(false);
   const playbackRef = useRef(tile.playback);
@@ -119,6 +138,7 @@ export const PlayerTile = memo(function PlayerTile({
       detailState?: Partial<PlayerHealth>,
     ) => {
       if (['ready', 'playing'].includes(nextStatus)) lastReadyAt.current = Date.now();
+      statusRef.current = nextStatus;
       setStatus(nextStatus);
       if (nextMessage !== undefined) setMessage(nextMessage);
       if (detail !== undefined) setTechnicalDetail(detail);
@@ -138,20 +158,43 @@ export const PlayerTile = memo(function PlayerTile({
     [onHealth, tile.id, tile.source.url],
   );
 
-  const reportControlFailure = useCallback((label: string) => {
-    setControlMessage(`${label} could not be applied. The player is still connected.`);
-    clearTimeout(messageTimer.current);
-    messageTimer.current = window.setTimeout(() => setControlMessage(''), 4_000);
-  }, []);
+  const reportControlFailure = useCallback(
+    (label: string, error?: unknown) => {
+      const activation = (label === 'Play' || label === 'Unmute') && !pendingControls.current.muted;
+      if (activation) {
+        audioActivationEpoch.current += 1;
+        audioActivationRequired.current = true;
+        publish(
+          statusRef.current,
+          'Wall audio needs activation.',
+          error instanceof Error ? error.message : 'autoplay-with-sound-rejected',
+          undefined,
+          undefined,
+          { audioActivationRequired: true, muted: true },
+        );
+      }
+      setControlMessage(
+        activation
+          ? 'Wall audio needs activation.'
+          : `${label} could not be applied. The player is still connected.`,
+      );
+      clearTimeout(messageTimer.current);
+      messageTimer.current = window.setTimeout(() => setControlMessage(''), 4_000);
+    },
+    [publish],
+  );
 
   const runControl = useCallback(
-    (label: string, action: (current: Adapter) => void) => {
+    (label: string, action: (current: Adapter) => void | Promise<void>) => {
       if (!adapter.current || !adapterReady.current) return false;
       try {
-        action(adapter.current);
+        const result = action(adapter.current);
+        if (result && typeof result.then === 'function') {
+          void result.catch((error) => reportControlFailure(label, error));
+        }
         return true;
-      } catch {
-        reportControlFailure(label);
+      } catch (error) {
+        reportControlFailure(label, error);
         return false;
       }
     },
@@ -176,6 +219,37 @@ export const PlayerTile = memo(function PlayerTile({
     }
   }, [onPlaybackProgress, onResumePosition, tile.id, tile.source.url]);
 
+  const verifyAudioActivation = useCallback(() => {
+    clearTimeout(audioCheckTimer.current);
+    const expectedEpoch = audioActivationEpoch.current;
+    audioCheckTimer.current = window.setTimeout(() => {
+      if (expectedEpoch !== audioActivationEpoch.current) return;
+      if (pendingControls.current.muted) return;
+      if (adapter.current?.isMuted() !== true) {
+        audioActivationRequired.current = false;
+        publish(
+          statusRef.current,
+          statusRef.current === 'playing' ? 'Playing' : undefined,
+          undefined,
+          undefined,
+          undefined,
+          { audioActivationRequired: false, muted: false },
+        );
+        return;
+      }
+      audioActivationRequired.current = true;
+      audioActivationEpoch.current += 1;
+      publish(
+        statusRef.current,
+        'Wall audio needs activation.',
+        'browser-kept-player-muted',
+        undefined,
+        undefined,
+        { audioActivationRequired: true, muted: true },
+      );
+    }, 600);
+  }, [publish]);
+
   const stopPlayer = useCallback(() => {
     clearTimeout(retryTimer.current);
     capturePosition();
@@ -189,13 +263,29 @@ export const PlayerTile = memo(function PlayerTile({
   const runPlayerCommand = useCallback(
     (next: PlayerCommand) => {
       if (next.command === 'volume') pendingControls.current.volume = next.value ?? 0;
-      if (next.command === 'mute') pendingControls.current.muted = true;
+      if (next.command === 'mute') {
+        pendingControls.current.muted = true;
+        audioActivationRequired.current = false;
+        audioActivationEpoch.current += 1;
+      }
       if (next.command === 'unmute') pendingControls.current.muted = false;
+      if (next.command === 'play' || next.command === 'resume')
+        requestedPlayback.current = 'playing';
+      if (next.command === 'pause') requestedPlayback.current = 'paused';
       if (next.command === 'stop') return stopPlayer();
       if (next.command === 'retry') {
         retryAttempt.current = 0;
         clearTimeout(retryTimer.current);
         setRetryNonce((value) => value + 1);
+        return;
+      }
+      if (
+        tile.source.type === 'website' &&
+        ['play', 'pause', 'resume', 'seek'].includes(next.command)
+      )
+        return;
+      if (!adapterReady.current) {
+        pendingCommands.current.push(next);
         return;
       }
       if (next.command === 'go-live') {
@@ -216,38 +306,30 @@ export const PlayerTile = memo(function PlayerTile({
         capturePosition();
         return runControl('Next video', (current) => current.next());
       }
-      if (
-        tile.source.type === 'website' &&
-        ['play', 'pause', 'resume', 'seek'].includes(next.command)
-      )
-        return;
-      if (!adapterReady.current) {
-        if (!['volume', 'mute', 'unmute'].includes(next.command)) pendingTransport.current = next;
-        return;
-      }
-      if (next.command === 'play' || next.command === 'resume')
+      if (next.command === 'play' || next.command === 'resume') {
         runControl('Play', (current) => current.play());
+      }
       if (next.command === 'pause') {
         runControl('Pause', (current) => current.pause());
         capturePosition();
       }
       if (next.command === 'seek') runControl('Seek', (current) => current.seek(next.value ?? 0));
       if (next.command === 'mute') runControl('Mute', (current) => current.setMuted(true));
-      if (next.command === 'unmute') runControl('Unmute', (current) => current.setMuted(false));
+      if (next.command === 'unmute') {
+        runControl('Unmute', (current) => current.setMuted(false));
+        verifyAudioActivation();
+      }
       if (next.command === 'volume')
         runControl('Volume', (current) => current.setVolume(next.value ?? 0));
     },
-    [capturePosition, publish, runControl, stopPlayer, tile.source.type],
+    [capturePosition, publish, runControl, stopPlayer, tile.source.type, verifyAudioActivation],
   );
 
   const applyPendingControls = useCallback(() => {
     runControl('Volume', (current) => current.setVolume(pendingControls.current.volume));
     runControl('Mute', (current) => current.setMuted(pendingControls.current.muted));
-    if (pendingTransport.current) {
-      const next = pendingTransport.current;
-      pendingTransport.current = undefined;
-      runPlayerCommand(next);
-    }
+    const commands = pendingCommands.current.splice(0);
+    commands.forEach(runPlayerCommand);
   }, [runControl, runPlayerCommand]);
 
   const applyStartBehavior = useCallback(() => {
@@ -303,6 +385,7 @@ export const PlayerTile = memo(function PlayerTile({
       retryAttempt.current = 0;
       lastReadyAt.current = undefined;
       currentSourceKey.current = sourceKey;
+      pendingCommands.current = [];
     }
   }, [sourceKey]);
 
@@ -312,13 +395,12 @@ export const PlayerTile = memo(function PlayerTile({
     let disposed = false;
     let timeout: number | undefined;
     adapterReady.current = false;
-    pendingTransport.current = undefined;
     node.replaceChildren();
     if (stopped) {
       publish('stopped', 'Players are stopped. Resume All to reconnect.');
       return;
     }
-    publish('loading', 'Connecting to source…');
+    publish('initializing', 'Initializing player…');
 
     const ready = (nextStatus: PlayerHealthStatus = 'ready') => {
       retryAttempt.current = 0;
@@ -368,12 +450,37 @@ export const PlayerTile = memo(function PlayerTile({
       const mockDuration = Number(parameters.get('duration')) || 3600;
       const mockLive = parameters.get('live') === '1';
       const mockPlaylist = (parameters.get('playlist') ?? '').split(',').filter(Boolean);
+      let mockMuted = pendingControls.current.muted;
+      let mockPlayRejected = false;
+      mock.dataset.muted = String(mockMuted);
+      mock.dataset.playing = 'true';
+      mock.dataset.volume = String(pendingControls.current.volume);
       let mockPlaylistIndex = Math.min(
         Math.max(0, mockPlaylist.length - 1),
         Math.max(0, progressRef.current?.playlistIndex ?? tile.playlistIndex ?? 0),
       );
       adapter.current = {
         ...emptyAdapter,
+        play: () => {
+          if (parameters.get('rejectPlay') === '1' && !mockPlayRejected) {
+            mockPlayRejected = true;
+            return Promise.reject(new DOMException('NotAllowedError'));
+          }
+          mock.dataset.playing = 'true';
+          publish('playing', 'Playing', undefined, undefined, undefined, { muted: mockMuted });
+        },
+        pause: () => {
+          mock.dataset.playing = 'false';
+          publish('paused', 'Paused', undefined, undefined, undefined, { muted: mockMuted });
+        },
+        setMuted: (muted) => {
+          mockMuted = muted;
+          mock.dataset.muted = String(muted);
+        },
+        setVolume: (volume) => {
+          mock.dataset.volume = String(volume);
+        },
+        isMuted: () => mockMuted,
         seek: setMockPosition,
         getPosition: () => mockPosition,
         getDuration: () => (mockLive ? undefined : mockDuration),
@@ -414,111 +521,197 @@ export const PlayerTile = memo(function PlayerTile({
       } else ready('playing');
     } else if (tile.source.type === 'youtube' || tile.source.type === 'youtube-playlist') {
       const playerNode = document.createElement('div');
+      const isPlaylist = tile.source.type === 'youtube-playlist';
       node.appendChild(playerNode);
-      loadYouTube().then((YT) => {
-        if (disposed) return;
-        const isPlaylist = tile.source.type === 'youtube-playlist';
-        const player = new YT.Player(playerNode, {
-          videoId: isPlaylist ? undefined : tile.source.youtubeId,
-          playerVars: {
-            autoplay: 1,
-            mute: 1,
-            playsinline: 1,
-            rel: 0,
-            origin: location.origin,
-            ...(isPlaylist
-              ? {
-                  listType: 'playlist',
-                  list: tile.source.playlistId,
-                  index: progressRef.current?.playlistIndex ?? tile.playlistIndex ?? 0,
+      timeout = window.setTimeout(() => {
+        if (disposed || adapterReady.current) return;
+        publish(
+          'failed',
+          'YouTube did not become ready. Select Retry now, or open the source externally.',
+          'youtube-readiness-timeout',
+        );
+      }, 12_000);
+      loadYouTube()
+        .then((YT) => {
+          if (disposed) return;
+          publish('loading', isPlaylist ? 'Loading playlist…' : 'Loading video…');
+          let startingVideoApplied = false;
+          const player = new YT.Player(playerNode, {
+            ...(isPlaylist ? {} : { videoId: tile.source.youtubeId }),
+            playerVars: {
+              autoplay: 1,
+              mute: 1,
+              playsinline: 1,
+              rel: 0,
+              origin: location.origin,
+            },
+            events: {
+              onReady: () => {
+                if (disposed) return;
+                clearTimeout(timeout);
+                if (isPlaylist) {
+                  publish('loading', 'Loading playlist…');
+                  player.setLoop?.(false);
+                  player.loadPlaylist({
+                    listType: 'playlist',
+                    list: tile.source.playlistId,
+                    index:
+                      progressRef.current?.playlistIndex ??
+                      tile.playlistIndex ??
+                      tile.source.playlistStartIndex ??
+                      0,
+                    startSeconds:
+                      playbackRef.current?.behavior === 'specific'
+                        ? playbackRef.current.specificTime
+                        : (progressRef.current?.position ?? tile.resumePosition ?? 0),
+                  });
                 }
-              : {}),
-          },
-          events: {
-            onReady: () => {
-              if (disposed) return;
-              ready();
-              runControl('Play', (current) => current.play());
-            },
-            onStateChange: (event: { data: number }) => {
-              const list = (player.getPlaylist?.() ?? []) as string[];
-              const index = Number(player.getPlaylistIndex?.()) || 0;
-              if (isPlaylist && event.data === 0 && index >= list.length - 1) {
-                player.stopVideo();
-                capturePosition();
-                publish('paused', 'Playlist complete', undefined, undefined, undefined, {
-                  playlistIndex: index,
-                  playlistLength: list.length,
-                });
-                return;
-              }
-              if (event.data === 2 || event.data === 0) capturePosition();
-              const mapped: Record<number, PlayerHealthStatus> = {
-                [-1]: 'loading',
-                0: 'paused',
-                1: 'playing',
-                2: 'paused',
-                3: 'buffering',
-                5: 'ready',
-              };
-              const data = player.getVideoData?.() ?? {};
-              const duration = Number(player.getDuration?.()) || undefined;
-              const position = Number(player.getCurrentTime?.()) || 0;
-              const isLive = Boolean(data.isLive) || duration === 0;
-              publish(mapped[event.data] ?? 'unknown', undefined, undefined, undefined, undefined, {
-                isLive,
-                atLiveEdge: isLive ? duration === undefined || duration - position < 5 : undefined,
-                position,
-                duration,
-                playlistIndex: isPlaylist ? index : undefined,
-                playlistLength: isPlaylist ? list.length : undefined,
-                currentTitle: typeof data.title === 'string' ? data.title : undefined,
-              });
-            },
-            onError: (event: { data: number }) => {
-              const friendly =
-                event.data === 153
-                  ? 'YouTube rejected the page referrer (Error 153).'
-                  : 'YouTube could not play this video.';
-              if (isPlaylist) {
-                player.nextVideo();
+                ready();
+              },
+              onStateChange: (event: { data: number }) => {
+                const list = (player.getPlaylist?.() ?? []) as string[];
+                const index = Math.max(0, Number(player.getPlaylistIndex?.()) || 0);
+                if (
+                  isPlaylist &&
+                  !startingVideoApplied &&
+                  tile.source.playlistStartVideoId &&
+                  list.length
+                ) {
+                  startingVideoApplied = true;
+                  const startingIndex = list.indexOf(tile.source.playlistStartVideoId);
+                  if (startingIndex >= 0 && startingIndex !== index) {
+                    player.playVideoAt(startingIndex);
+                    return;
+                  }
+                }
+                if (isPlaylist && event.data === 0 && list.length > 0 && index >= list.length - 1) {
+                  player.stopVideo();
+                  capturePosition();
+                  requestedPlayback.current = 'paused';
+                  publish('ended', 'Playlist complete', undefined, undefined, undefined, {
+                    playlistIndex: index,
+                    playlistLength: list.length,
+                  });
+                  return;
+                }
+                if (event.data === 2 || event.data === 0) capturePosition();
+                const mapped: Record<number, PlayerHealthStatus> = {
+                  [-1]: 'loading',
+                  0: 'ended',
+                  1: 'playing',
+                  2: 'paused',
+                  3: 'buffering',
+                  5: 'ready',
+                };
+                const stateMessage: Record<number, string> = {
+                  [-1]: isPlaylist ? 'Loading playlist…' : 'Loading video…',
+                  0: 'Ended',
+                  1: 'Playing',
+                  2: 'Paused',
+                  3: 'Buffering',
+                  5: 'Ready',
+                };
+                const data = player.getVideoData?.() ?? {};
+                const duration = Number(player.getDuration?.()) || undefined;
+                const position = Number(player.getCurrentTime?.()) || 0;
+                const isLive = Boolean(data.isLive) || duration === 0;
+                const muted = Boolean(player.isMuted?.());
+                if (event.data === 1 && !muted) audioActivationRequired.current = false;
                 publish(
-                  'buffering',
-                  'Skipped an unavailable playlist item.',
-                  `youtube:${event.data}`,
+                  mapped[event.data] ?? 'unknown',
+                  stateMessage[event.data] ?? 'Player state unavailable',
+                  undefined,
                   undefined,
                   undefined,
                   {
-                    warning:
-                      'A private, deleted, restricted, or unavailable playlist item was skipped.',
+                    isLive,
+                    atLiveEdge: isLive
+                      ? duration === undefined || duration - position < 5
+                      : undefined,
+                    position,
+                    duration,
+                    playlistIndex: isPlaylist ? index : undefined,
+                    playlistLength: isPlaylist ? list.length : undefined,
+                    currentTitle: typeof data.title === 'string' ? data.title : undefined,
+                    muted,
+                    audioActivationRequired: audioActivationRequired.current,
                   },
                 );
-              } else scheduleRetry(friendly, `youtube:${event.data}`);
+              },
+              onError: (event: { data: number }) => {
+                const friendly =
+                  event.data === 153
+                    ? 'YouTube rejected the page referrer (Error 153).'
+                    : 'YouTube could not play this video.';
+                if (isPlaylist && event.data !== 153) {
+                  player.nextVideo();
+                  publish(
+                    'buffering',
+                    'Skipped an unavailable playlist item.',
+                    `youtube:${event.data}`,
+                    undefined,
+                    undefined,
+                    {
+                      warning:
+                        'A private, deleted, restricted, or unavailable playlist item was skipped.',
+                    },
+                  );
+                } else scheduleRetry(friendly, `youtube:${event.data}`);
+              },
+              onAutoplayBlocked: () => {
+                if (!pendingControls.current.muted) {
+                  audioActivationEpoch.current += 1;
+                  audioActivationRequired.current = true;
+                  publish(
+                    'paused',
+                    'Wall audio needs activation.',
+                    'youtube-autoplay-blocked',
+                    undefined,
+                    undefined,
+                    { audioActivationRequired: true, muted: true },
+                  );
+                } else {
+                  publish(
+                    'paused',
+                    'Autoplay was blocked. Select Play to retry.',
+                    'youtube-autoplay-blocked',
+                  );
+                }
+              },
             },
-          },
+          });
+          adapter.current = {
+            play: () => player.playVideo(),
+            pause: () => player.pauseVideo(),
+            seek: (seconds) => player.seekTo(seconds, true),
+            setMuted: (muted) => (muted ? player.mute() : player.unMute()),
+            setVolume: (volume) => player.setVolume(volume),
+            getPosition: () => Number(player.getCurrentTime?.()) || 0,
+            getDuration: () => Number(player.getDuration?.()) || undefined,
+            isLive: () => Boolean(player.getVideoData?.()?.isLive) || player.getDuration?.() === 0,
+            goLive: () => {
+              const duration = Number(player.getDuration?.());
+              if (Number.isFinite(duration) && duration > 0)
+                player.seekTo(Math.max(0, duration - 2), true);
+              player.playVideo();
+            },
+            getPlaylistIndex: () =>
+              isPlaylist ? Math.max(0, Number(player.getPlaylistIndex?.()) || 0) : undefined,
+            previous: () => isPlaylist && player.previousVideo(),
+            next: () => isPlaylist && player.nextVideo(),
+            isMuted: () => Boolean(player.isMuted?.()),
+            destroy: () => player.destroy(),
+          };
+        })
+        .catch((error: unknown) => {
+          if (disposed) return;
+          clearTimeout(timeout);
+          publish(
+            'failed',
+            'YouTube could not initialize. Select Retry now, or open the source externally.',
+            error instanceof Error ? error.message : 'youtube-api-load-failed',
+          );
         });
-        adapter.current = {
-          play: () => player.playVideo(),
-          pause: () => player.pauseVideo(),
-          seek: (seconds) => player.seekTo(seconds, true),
-          setMuted: (muted) => (muted ? player.mute() : player.unMute()),
-          setVolume: (volume) => player.setVolume(volume),
-          getPosition: () => Number(player.getCurrentTime?.()) || 0,
-          getDuration: () => Number(player.getDuration?.()) || undefined,
-          isLive: () => Boolean(player.getVideoData?.()?.isLive) || player.getDuration?.() === 0,
-          goLive: () => {
-            const duration = Number(player.getDuration?.());
-            if (Number.isFinite(duration) && duration > 0)
-              player.seekTo(Math.max(0, duration - 2), true);
-            player.playVideo();
-          },
-          getPlaylistIndex: () =>
-            isPlaylist ? Math.max(0, Number(player.getPlaylistIndex?.()) || 0) : undefined,
-          previous: () => isPlaylist && player.previousVideo(),
-          next: () => isPlaylist && player.nextVideo(),
-          destroy: () => player.destroy(),
-        };
-      });
     } else if (tile.source.type === 'hls') {
       const video = document.createElement('video');
       video.autoplay = true;
@@ -546,7 +739,7 @@ export const PlayerTile = memo(function PlayerTile({
       video.onerror = () =>
         scheduleRetry('This HLS stream could not be loaded.', 'native-hls-error');
       adapter.current = {
-        play: () => void video.play(),
+        play: () => video.play(),
         pause: () => video.pause(),
         seek: (seconds) => (video.currentTime = seconds),
         setMuted: (muted) => (video.muted = muted),
@@ -563,6 +756,7 @@ export const PlayerTile = memo(function PlayerTile({
         getPlaylistIndex: () => undefined,
         previous() {},
         next() {},
+        isMuted: () => video.muted,
         destroy: () => {
           hls?.destroy();
           video.removeAttribute('src');
@@ -610,7 +804,10 @@ export const PlayerTile = memo(function PlayerTile({
     tile.source.url,
     tile.source.youtubeId,
     tile.source.playlistId,
+    tile.source.playlistStartIndex,
+    tile.source.playlistStartVideoId,
     tile.playlistIndex,
+    tile.resumePosition,
   ]);
 
   useEffect(() => {
@@ -632,26 +829,48 @@ export const PlayerTile = memo(function PlayerTile({
     pendingControls.current.volume = tile.volume;
     runControl('Volume', (current) => current.setVolume(tile.volume));
   }, [runControl, tile.volume]);
+
   useEffect(() => {
-    if (
-      !command ||
-      (command.tileId !== tile.id && command.tileId !== '*') ||
-      command.id === lastCommandId.current
-    )
-      return;
-    lastCommandId.current = command.id;
-    runPlayerCommand(command);
-  }, [command, runPlayerCommand, tile.id]);
+    const activate = () => {
+      if (!audioActivationRequired.current || pendingControls.current.muted) return;
+      audioActivationRequired.current = false;
+      runControl('Unmute', (current) => current.setMuted(false));
+      if (requestedPlayback.current === 'playing') runControl('Play', (current) => current.play());
+      verifyAudioActivation();
+    };
+    window.addEventListener('livewall-enable-audio', activate);
+    return () => window.removeEventListener('livewall-enable-audio', activate);
+  }, [runControl, verifyAudioActivation]);
+  useEffect(() => {
+    const received = commands?.length ? commands : command ? [command] : [];
+    received.forEach((next) => {
+      if (
+        processedCommandIds.current.has(next.id) ||
+        (next.tileId !== tile.id && next.tileId !== '*')
+      )
+        return;
+      processedCommandIds.current.add(next.id);
+      runPlayerCommand(next);
+    });
+  }, [command, commands, runPlayerCommand, tile.id]);
   useEffect(
     () => () => {
       clearTimeout(messageTimer.current);
+      clearTimeout(audioCheckTimer.current);
       clearTimeout(retryTimer.current);
       capturePosition();
     },
     [capturePosition],
   );
 
-  const showState = ['loading', 'retrying', 'stopped', 'failed', 'unsupported'].includes(status);
+  const showState = [
+    'initializing',
+    'loading',
+    'retrying',
+    'stopped',
+    'failed',
+    'unsupported',
+  ].includes(status);
   return (
     <article
       className={`player-tile overlay-${overlayMode} ${focused ? 'is-focused' : ''}`}
@@ -675,13 +894,15 @@ export const PlayerTile = memo(function PlayerTile({
           <strong>
             {status === 'retrying'
               ? 'Reconnecting'
-              : status === 'stopped'
-                ? 'Stopped'
-                : status === 'failed'
-                  ? 'Source unavailable'
-                  : status === 'unsupported'
-                    ? 'Unsupported or blocked'
-                    : 'Loading'}
+              : status === 'initializing'
+                ? 'Initializing'
+                : status === 'stopped'
+                  ? 'Stopped'
+                  : status === 'failed'
+                    ? 'Source unavailable'
+                    : status === 'unsupported'
+                      ? 'Unsupported or blocked'
+                      : 'Loading'}
           </strong>
           <span>{message}</span>
           {technicalDetail && <small title={technicalDetail}>{technicalDetail}</small>}
@@ -725,5 +946,6 @@ const emptyAdapter: Adapter = {
   getPlaylistIndex: () => undefined,
   previous() {},
   next() {},
+  isMuted: () => undefined,
   destroy() {},
 };

@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import legacyState from '../test/fixtures/legacy-pre-p1.json';
 import { useWall } from './useWall';
@@ -10,6 +10,10 @@ class FakeBroadcastChannel {
 }
 
 class FakeWebSocket {
+  static instances: FakeWebSocket[] = [];
+  constructor() {
+    FakeWebSocket.instances.push(this);
+  }
   onopen?: () => void;
   onclose?: () => void;
   onmessage?: (event: MessageEvent) => void;
@@ -18,6 +22,7 @@ class FakeWebSocket {
 
 describe('useWall state ingress', () => {
   beforeEach(() => {
+    FakeWebSocket.instances = [];
     vi.stubGlobal('BroadcastChannel', FakeBroadcastChannel);
     vi.stubGlobal('WebSocket', FakeWebSocket);
   });
@@ -45,5 +50,38 @@ describe('useWall state ingress', () => {
     await waitFor(() => expect(result.current.stateError).toContain('could not be loaded safely'));
     expect(result.current.state.tiles).toEqual([]);
     expect(result.current.state.appearance.backgroundColor).toBe('#020305');
+  });
+
+  it('delivers every rapid player command to the Wall in order', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, json: async () => structuredClone(legacyState) }),
+    );
+    const { result } = renderHook(() => {
+      const wall = useWall();
+      return wall;
+    });
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    const socket = FakeWebSocket.instances[0];
+    act(() => {
+      for (const id of ['mute-one', 'unmute-two', 'pause-two', 'play-two']) {
+        socket.onmessage?.(
+          new MessageEvent('message', {
+            data: JSON.stringify({
+              type: 'command',
+              command: { id, tileId: 'tile', command: id.split('-')[0], sentAt: 1 },
+            }),
+          }),
+        );
+      }
+    });
+    await waitFor(() =>
+      expect(result.current.commands.map((command) => command.id)).toEqual([
+        'mute-one',
+        'unmute-two',
+        'pause-two',
+        'play-two',
+      ]),
+    );
   });
 });

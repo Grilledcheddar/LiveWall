@@ -11,6 +11,8 @@ export interface VideoSource {
   type: SourceType;
   youtubeId?: string;
   playlistId?: string;
+  playlistStartVideoId?: string;
+  playlistStartIndex?: number;
 }
 
 export interface Tile {
@@ -35,6 +37,7 @@ export interface Tile {
 
 export type OverlayMode = 'off' | 'hover' | 'always';
 export type PlayerHealthStatus =
+  | 'initializing'
   | 'loading'
   | 'ready'
   | 'playing'
@@ -44,6 +47,7 @@ export type PlayerHealthStatus =
   | 'stopped'
   | 'unsupported'
   | 'failed'
+  | 'ended'
   | 'unknown';
 
 export interface WallAppearance {
@@ -114,6 +118,8 @@ export interface PlayerHealth {
   currentTitle?: string;
   upNextTitle?: string;
   warning?: string;
+  audioActivationRequired?: boolean;
+  muted?: boolean;
 }
 
 export interface LayoutSlot {

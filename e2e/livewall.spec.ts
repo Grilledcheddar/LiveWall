@@ -920,3 +920,98 @@ test('P3 VOD progress survives pause, progress writes, Wall reopen, and Stop/Res
   await expect(wall.locator('.mock-player')).toBeVisible();
   await context.close();
 });
+
+test('P3 playback repair preserves ordered Admin control and active audio before a Wall click', async ({
+  browser,
+  request,
+}) => {
+  await request.put('/api/state', {
+    data: {
+      version: 0,
+      updatedAt: Date.now(),
+      layoutMode: 'automatic',
+      tiles: [
+        {
+          id: 'audio-first',
+          name: 'Audio First',
+          source: {
+            type: 'mock',
+            url: 'https://mock.livewall.local/?label=audio-first&rejectPlay=1&position=17',
+          },
+          x: 0,
+          y: 0,
+          w: 6,
+          h: 6,
+          muted: true,
+          volume: 61,
+          displayOrder: 0,
+        },
+        {
+          id: 'audio-second',
+          name: 'Audio Second',
+          source: {
+            type: 'mock',
+            url: 'https://mock.livewall.local/?label=audio-second&position=29',
+          },
+          x: 6,
+          y: 0,
+          w: 6,
+          h: 6,
+          muted: true,
+          volume: 37,
+          displayOrder: 1,
+        },
+      ],
+    },
+  });
+  const context = await browser.newContext();
+  const admin = await context.newPage();
+  const wall = await context.newPage();
+  await Promise.all([admin.goto('/admin'), wall.goto('/wall')]);
+  const players = wall.locator('.mock-player');
+  await expect(players).toHaveCount(2);
+  await expect
+    .poll(
+      async () => ((await (await request.get('/api/player-health')).json()) as unknown[]).length,
+    )
+    .toBe(2);
+  const lateAdmin = await context.newPage();
+  await lateAdmin.goto('/admin');
+  await expect(lateAdmin.locator('.health-strip').first()).not.toContainText('unknown');
+  await lateAdmin.close();
+  const instanceIds = await players.evaluateAll((items) =>
+    items.map((item) => item.getAttribute('data-instance-id')),
+  );
+  const positions = await players.evaluateAll((items) =>
+    items.map((item) => item.getAttribute('data-position')),
+  );
+  const first = admin.locator('[data-testid="admin-tile"]').filter({ hasText: 'Audio First' });
+  const second = admin.locator('[data-testid="admin-tile"]').filter({ hasText: 'Audio Second' });
+
+  await first.getByRole('button', { name: 'Muted' }).click();
+  await expect(players.nth(0)).toHaveAttribute('data-muted', 'false');
+  await expect(players.nth(1)).toHaveAttribute('data-muted', 'true');
+  await first.getByRole('button', { name: 'Pause' }).click();
+  await expect(players.nth(0)).toHaveAttribute('data-playing', 'false');
+  await first.getByRole('button', { name: 'Play' }).click();
+  await expect(first.getByRole('button', { name: 'Wall audio needs activation' })).toBeVisible();
+  await expect(wall.getByRole('button', { name: /Enable Audio/ })).toBeVisible();
+  await wall.getByRole('button', { name: /Enable Audio/ }).click();
+  await expect(wall.getByRole('button', { name: /Enable Audio/ })).toHaveCount(0);
+  await expect(players.nth(0)).toHaveAttribute('data-playing', 'true');
+
+  await second.getByRole('button', { name: 'Muted' }).click();
+  await expect(players.nth(0)).toHaveAttribute('data-muted', 'true');
+  await expect(players.nth(1)).toHaveAttribute('data-muted', 'false');
+  await expect(players.nth(0)).toHaveAttribute('data-playing', 'true');
+  await expect(players.nth(1)).toHaveAttribute('data-playing', 'true');
+  expect(
+    await players.evaluateAll((items) =>
+      items.map((item) => item.getAttribute('data-instance-id')),
+    ),
+  ).toEqual(instanceIds);
+  expect(
+    await players.evaluateAll((items) => items.map((item) => item.getAttribute('data-position'))),
+  ).toEqual(positions);
+  await context.close();
+});
