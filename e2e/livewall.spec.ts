@@ -746,7 +746,7 @@ test('P3 layout previews, custom templates, and named walls preserve live player
   });
   await request.put('/api/layout-templates', { data: { templates: [] } });
   await request.put('/api/wall-presets', { data: { presets: [] } });
-  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const context = await browser.newContext({ viewport: { width: 960, height: 600 } });
   const admin = await context.newPage();
   const wall = await context.newPage();
   await Promise.all([admin.goto('/admin'), wall.goto('/wall')]);
@@ -785,6 +785,14 @@ test('P3 layout previews, custom templates, and named walls preserve live player
   await admin.getByRole('tab', { name: 'Layouts' }).click();
   const customTrigger = admin.getByRole('button', { name: 'New Custom Layout' });
   await customTrigger.click();
+  const builderBounds = await admin
+    .getByRole('dialog', { name: 'New layout template' })
+    .boundingBox();
+  expect(builderBounds).not.toBeNull();
+  expect(builderBounds!.x).toBeGreaterThanOrEqual(0);
+  expect(builderBounds!.y).toBeGreaterThanOrEqual(0);
+  expect(builderBounds!.x + builderBounds!.width).toBeLessThanOrEqual(960);
+  expect(builderBounds!.y + builderBounds!.height).toBeLessThanOrEqual(600);
   await admin.getByLabel('Unique template name').fill('Two top and wide bottom');
   await admin.getByRole('button', { name: 'Preview', exact: true }).last().click();
   await expect(admin.getByText('3 usable slots')).toBeVisible();
