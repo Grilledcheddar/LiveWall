@@ -318,6 +318,7 @@ export function SourceLibraryPanel({
           <select value={type} onChange={(event) => setType(event.target.value)}>
             <option value="all">All types</option>
             <option value="youtube">YouTube</option>
+            <option value="youtube-playlist">YouTube playlists</option>
             <option value="hls">HLS / M3U8</option>
             <option value="website">Website</option>
           </select>

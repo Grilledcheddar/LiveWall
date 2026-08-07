@@ -198,11 +198,24 @@ export const PlayerTile = memo(function PlayerTile({
         setRetryNonce((value) => value + 1);
         return;
       }
-      if (next.command === 'go-live') return runControl('Go Live', (current) => current.goLive());
+      if (next.command === 'go-live') {
+        const applied = runControl('Go Live', (current) => current.goLive());
+        if (applied)
+          publish('playing', 'LIVE', undefined, undefined, undefined, {
+            isLive: true,
+            atLiveEdge: true,
+          });
+        return;
+      }
       if (next.command === 'restart') return runControl('Restart', (current) => current.seek(0));
-      if (next.command === 'previous')
+      if (next.command === 'previous') {
+        capturePosition();
         return runControl('Previous video', (current) => current.previous());
-      if (next.command === 'next') return runControl('Next video', (current) => current.next());
+      }
+      if (next.command === 'next') {
+        capturePosition();
+        return runControl('Next video', (current) => current.next());
+      }
       if (
         tile.source.type === 'website' &&
         ['play', 'pause', 'resume', 'seek'].includes(next.command)
@@ -214,14 +227,17 @@ export const PlayerTile = memo(function PlayerTile({
       }
       if (next.command === 'play' || next.command === 'resume')
         runControl('Play', (current) => current.play());
-      if (next.command === 'pause') runControl('Pause', (current) => current.pause());
+      if (next.command === 'pause') {
+        runControl('Pause', (current) => current.pause());
+        capturePosition();
+      }
       if (next.command === 'seek') runControl('Seek', (current) => current.seek(next.value ?? 0));
       if (next.command === 'mute') runControl('Mute', (current) => current.setMuted(true));
       if (next.command === 'unmute') runControl('Unmute', (current) => current.setMuted(false));
       if (next.command === 'volume')
         runControl('Volume', (current) => current.setVolume(next.value ?? 0));
     },
-    [runControl, stopPlayer, tile.source.type],
+    [capturePosition, publish, runControl, stopPlayer, tile.source.type],
   );
 
   const applyPendingControls = useCallback(() => {
@@ -307,9 +323,28 @@ export const PlayerTile = memo(function PlayerTile({
     const ready = (nextStatus: PlayerHealthStatus = 'ready') => {
       retryAttempt.current = 0;
       adapterReady.current = true;
-      applyPendingControls();
       applyStartBehavior();
-      publish(nextStatus, nextStatus === 'playing' ? 'Playing' : 'Ready');
+      applyPendingControls();
+      const isLive = adapter.current?.isLive() ?? false;
+      const position = adapter.current?.getPosition();
+      const duration = adapter.current?.getDuration();
+      publish(
+        nextStatus,
+        isLive ? 'LIVE' : nextStatus === 'playing' ? 'Playing' : 'Ready',
+        undefined,
+        undefined,
+        undefined,
+        {
+          isLive,
+          atLiveEdge:
+            isLive && typeof position === 'number'
+              ? duration === undefined || duration - position < 5
+              : undefined,
+          position,
+          duration,
+          playlistIndex: adapter.current?.getPlaylistIndex(),
+        },
+      );
     };
 
     if (tile.source.type === 'mock') {
@@ -325,24 +360,51 @@ export const PlayerTile = memo(function PlayerTile({
       mock.append(badge, title);
       node.appendChild(mock);
       let mockPosition = Number(parameters.get('position')) || 0;
+      const setMockPosition = (position: number) => {
+        mockPosition = Math.max(0, position);
+        mock.dataset.position = String(mockPosition);
+      };
+      setMockPosition(mockPosition);
       const mockDuration = Number(parameters.get('duration')) || 3600;
       const mockLive = parameters.get('live') === '1';
       const mockPlaylist = (parameters.get('playlist') ?? '').split(',').filter(Boolean);
       let mockPlaylistIndex = Math.min(
         Math.max(0, mockPlaylist.length - 1),
-        Math.max(0, progress?.playlistIndex ?? tile.playlistIndex ?? 0),
+        Math.max(0, progressRef.current?.playlistIndex ?? tile.playlistIndex ?? 0),
       );
       adapter.current = {
         ...emptyAdapter,
-        seek: (seconds) => (mockPosition = Math.max(0, seconds)),
+        seek: setMockPosition,
         getPosition: () => mockPosition,
         getDuration: () => (mockLive ? undefined : mockDuration),
         isLive: () => mockLive,
-        goLive: () => (mockPosition = mockDuration),
+        goLive: () => setMockPosition(mockDuration),
         getPlaylistIndex: () => (mockPlaylist.length ? mockPlaylistIndex : undefined),
-        previous: () => (mockPlaylistIndex = Math.max(0, mockPlaylistIndex - 1)),
+        previous: () => {
+          mockPlaylistIndex = Math.max(0, mockPlaylistIndex - 1);
+          publish('playing', 'Playing playlist item', undefined, undefined, undefined, {
+            playlistIndex: mockPlaylistIndex,
+            playlistLength: mockPlaylist.length,
+            currentTitle: mockPlaylist[mockPlaylistIndex],
+            upNextTitle: mockPlaylist[mockPlaylistIndex + 1],
+          });
+        },
         next: () => {
-          if (mockPlaylistIndex < mockPlaylist.length - 1) mockPlaylistIndex += 1;
+          if (mockPlaylistIndex < mockPlaylist.length - 1) {
+            mockPlaylistIndex += 1;
+            publish('playing', 'Playing playlist item', undefined, undefined, undefined, {
+              playlistIndex: mockPlaylistIndex,
+              playlistLength: mockPlaylist.length,
+              currentTitle: mockPlaylist[mockPlaylistIndex],
+              upNextTitle: mockPlaylist[mockPlaylistIndex + 1],
+            });
+          } else {
+            publish('paused', 'Playlist complete', undefined, undefined, undefined, {
+              playlistIndex: mockPlaylistIndex,
+              playlistLength: mockPlaylist.length,
+              currentTitle: mockPlaylist[mockPlaylistIndex],
+            });
+          }
         },
       };
       if (parameters.get('health') === 'recoverable' && retryAttempt.current < 1) {
@@ -368,7 +430,7 @@ export const PlayerTile = memo(function PlayerTile({
               ? {
                   listType: 'playlist',
                   list: tile.source.playlistId,
-                  index: progress?.playlistIndex ?? tile.playlistIndex ?? 0,
+                  index: progressRef.current?.playlistIndex ?? tile.playlistIndex ?? 0,
                 }
               : {}),
           },
@@ -508,8 +570,8 @@ export const PlayerTile = memo(function PlayerTile({
         },
       };
       adapterReady.current = true;
-      applyPendingControls();
       applyStartBehavior();
+      applyPendingControls();
     } else {
       const frame = document.createElement('iframe');
       frame.src = tile.source.url;
@@ -539,7 +601,6 @@ export const PlayerTile = memo(function PlayerTile({
     applyPendingControls,
     applyStartBehavior,
     capturePosition,
-    progress?.playlistIndex,
     publish,
     retryNonce,
     runControl,

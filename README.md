@@ -46,6 +46,10 @@ LiveWall only listens on `127.0.0.1`. Other computers on the network cannot conn
 - After a source is saved, use **☆ Add to favorites** to mark it as a Favorite; **★ Favorited** removes that mark when selected again. Saving and favoriting are separate operations, and every entry displays its Recent, Saved, and Favorite labels.
 - Recents are deduplicated by canonical source identity and limited to 50. Equivalent YouTube watch, short, live, embed, and `youtu.be` URLs for one video share one entry. Clearing Recents never removes saved sources, favorites, or active tiles.
 - Library exports are versioned JSON. Import shows a merge preview, rejects unsafe URLs, creates a state backup, merges duplicates by canonical identity, and never overwrites active tiles.
+- Choose a source's **Start Behavior**: live edge, resume, a validated timestamp such as `1:25:30`, or the beginning. **Restart**, **Go Live**, and **Clear Saved Position** are explicit actions and changing the saved behavior does not reload a playing source.
+- YouTube playlist URLs and playlist IDs are saved as one reusable playlist source. Playlists advance in order, provide Previous/Next and position details, skip unavailable items with a warning, and stop after the final item. Shuffle and repeat are intentionally not part of P3.
+- **Layouts** contains visual previews for eleven built-in arrangements. Previewing is required before apply, and layouts with too few slots are blocked without hiding tiles. Custom layouts support up to nine numbered, grid-snapped rectangular slots with validation, Undo, Reset, Preview, rename, duplicate, edit, and delete.
+- **Named Walls** stores explicit snapshots. Preview a preset before replacing the workspace, or apply only its layout. Live edits continue to autosave for recovery but never overwrite a preset until **Update Preset** is chosen; **Save As** makes an independent preset.
 
 Volume changes are sent directly to the selected player while the slider moves and saved after a short debounce. They do not reload the Wall or recreate players.
 
@@ -56,6 +60,7 @@ The Wall starts remote players muted because Chrome and Edge generally block aut
 | Source                                                   | Playback                           | Remote controls                                            |
 | -------------------------------------------------------- | ---------------------------------- | ---------------------------------------------------------- |
 | YouTube videos, Live, Shorts, `youtu.be`, and embed URLs | Official YouTube IFrame Player API | Play, pause, seek, mute, volume                            |
+| YouTube playlists                                        | Official YouTube IFrame Player API | Play, pause, previous/next, mute, volume                   |
 | Direct HLS / `.m3u8`                                     | hls.js or browser-native HLS       | Play, pause, seek when the stream permits it, mute, volume |
 | Generic websites                                         | Best-effort iframe                 | Not available                                              |
 
@@ -65,7 +70,7 @@ Hulu, Paramount+, DIRECTV, and YouTube TV cannot be embedded as normal LiveWall 
 
 ## Saved configuration, backup, and reset
 
-The authoritative configuration is stored in `data\wall-state.json`. It contains source URLs, queues, absolute timer timestamps, layout coordinates, display order, volume, mute state, title mode, active audio selection, stop/resume state, focus selection, overlays, appearance, and the Source Library. Runtime health and dedicated-browser session records are intentionally separate and transient.
+The authoritative live workspace is stored in `data\wall-state.json`. It contains source URLs, queues, absolute timer timestamps, layout coordinates, display order, volume, mute state, title mode, active audio selection, stop/resume state, focus selection, overlays, appearance, and the Source Library. Named presets live in `data\wall-presets.json`, custom templates in `data\layout-templates.json`, and throttled VOD/playlist resume progress in `data\playback-progress.json`. Runtime health and dedicated-browser session records are intentionally separate and transient. All P3 files are versioned, validated, written atomically and serially, and excluded from Git.
 
 When an older state file is opened, LiveWall adds safe defaults for newer fields while preserving existing URLs, names, queues, timers, layouts, volume, mute, and audio selection. A failed migration leaves the original file untouched and prevents startup instead of replacing the wall with an empty state. Backups created before upgrades are kept under `data\backups`.
 

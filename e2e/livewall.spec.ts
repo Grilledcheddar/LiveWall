@@ -669,9 +669,9 @@ test('Source Library workflow and kiosk Wall controls preserve unrelated players
   await admin.getByRole('button', { name: 'New folder' }).click();
   await row.getByLabel('Folder').selectOption({ label: 'Cameras' });
   await expect(row).toContainText('Cameras');
-  await admin.getByLabel('Search').fill('Cameras');
+  await admin.getByLabel('Search', { exact: true }).fill('Cameras');
   await expect(admin.locator('.library-source-row')).toHaveCount(1);
-  await admin.getByLabel('Search').fill('');
+  await admin.getByLabel('Search', { exact: true }).fill('');
 
   await row.getByRole('button', { name: 'Add as Tile' }).click();
   await expect(wall.locator('.mock-player')).toHaveCount(3);
@@ -720,5 +720,167 @@ test('Source Library workflow and kiosk Wall controls preserve unrelated players
   await expect(
     admin.locator('.library-source-row').filter({ hasText: 'Library Camera' }),
   ).toContainText('Cameras');
+  await context.close();
+});
+
+test('P3 layout previews, custom templates, and named walls preserve live players', async ({
+  browser,
+  request,
+}) => {
+  const tiles = ['alpha', 'bravo', 'charlie'].map((label, displayOrder) => ({
+    id: `p3-${label}`,
+    name: label.toUpperCase(),
+    titleMode: 'manual',
+    source: { type: 'mock', url: `https://mock.livewall.local/?label=${label}` },
+    playback: { behavior: 'resume' },
+    x: (displayOrder % 2) * 6,
+    y: Math.floor(displayOrder / 2) * 6,
+    w: 6,
+    h: 6,
+    muted: true,
+    volume: 40 + displayOrder,
+    displayOrder,
+  }));
+  await request.put('/api/state', {
+    data: { version: 0, updatedAt: Date.now(), layoutMode: 'automatic', tiles },
+  });
+  await request.put('/api/layout-templates', { data: { templates: [] } });
+  await request.put('/api/wall-presets', { data: { presets: [] } });
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const admin = await context.newPage();
+  const wall = await context.newPage();
+  await Promise.all([admin.goto('/admin'), wall.goto('/wall')]);
+  const instances = await wall
+    .locator('.mock-player')
+    .evaluateAll((players) => players.map((player) => player.getAttribute('data-instance-id')));
+
+  await admin.getByRole('tab', { name: 'Layouts' }).click();
+  const customTrigger = admin.getByRole('button', { name: 'New Custom Layout' });
+  await customTrigger.click();
+  await admin.getByLabel('Unique template name').fill('Two top and wide bottom');
+  await admin.getByRole('button', { name: 'Preview', exact: true }).last().click();
+  await expect(admin.getByText('3 usable slots')).toBeVisible();
+  await admin.getByRole('button', { name: 'Save Template' }).click();
+  const customCard = admin.locator('.layout-card').filter({ hasText: 'Two top and wide bottom' });
+  await expect(customCard).toBeVisible();
+  await customCard.getByRole('button', { name: 'Preview' }).click();
+  await admin.getByRole('button', { name: 'Apply Layout' }).click();
+  await expect
+    .poll(() =>
+      wall
+        .locator('.mock-player')
+        .evaluateAll((players) => players.map((player) => player.getAttribute('data-instance-id'))),
+    )
+    .toEqual(instances);
+  const laidOut = await request.get('/api/state').then((response) => response.json());
+  expect(laidOut.layoutMode).toBe('template');
+  expect(laidOut.tiles.map((tile: { id: string }) => tile.id)).toEqual(
+    tiles.map((tile) => tile.id),
+  );
+
+  await admin.getByRole('tab', { name: 'Named Walls' }).click();
+  admin.once('dialog', (dialog) => dialog.accept('Morning desk'));
+  await admin.getByRole('button', { name: 'Save Current Wall' }).click();
+  const presetCard = admin.locator('.preset-card').filter({ hasText: 'Morning desk' });
+  await expect(presetCard).toBeVisible();
+  const savedBefore = await request.get('/api/wall-presets').then((response) => response.json());
+  const savedColor = savedBefore.presets[0].state.appearance.backgroundColor;
+  await admin.getByLabel('Background').fill('#123456');
+  await expect(admin.locator('.workspace-state')).toContainText('Modified');
+  const unchanged = await request.get('/api/wall-presets').then((response) => response.json());
+  expect(unchanged.presets[0].state.appearance.backgroundColor).toBe(savedColor);
+  await admin.getByRole('button', { name: 'Update Preset' }).click();
+  await expect
+    .poll(
+      async () =>
+        (await request.get('/api/wall-presets').then((response) => response.json())).presets[0]
+          .state.appearance.backgroundColor,
+    )
+    .toBe('#123456');
+
+  await admin.getByLabel('Background').fill('#654321');
+  const beforeLayoutOnly = await request.get('/api/state').then((response) => response.json());
+  admin.once('dialog', (dialog) => dialog.accept());
+  await presetCard.getByRole('button', { name: 'Preview' }).click();
+  await expect(admin.getByRole('dialog', { name: /Preview wall: Morning desk/ })).toBeVisible();
+  await admin.getByRole('button', { name: 'Apply Layout Only' }).click();
+  const afterLayoutOnly = await request.get('/api/state').then((response) => response.json());
+  for (const field of [
+    'source',
+    'name',
+    'queuedSource',
+    'scheduledAt',
+    'volume',
+    'muted',
+    'playback',
+  ])
+    expect(afterLayoutOnly.tiles.map((tile: Record<string, unknown>) => tile[field])).toEqual(
+      beforeLayoutOnly.tiles.map((tile: Record<string, unknown>) => tile[field]),
+    );
+  expect(afterLayoutOnly.activeAudioTileId).toBe(beforeLayoutOnly.activeAudioTileId);
+  expect(afterLayoutOnly.appearance.backgroundColor).toBe('#654321');
+  await expect
+    .poll(() =>
+      wall
+        .locator('.mock-player')
+        .evaluateAll((players) => players.map((player) => player.getAttribute('data-instance-id'))),
+    )
+    .toEqual(instances);
+  await context.close();
+});
+
+test('P3 VOD progress survives pause, progress writes, Wall reopen, and Stop/Resume', async ({
+  browser,
+  request,
+}) => {
+  const sourceUrl = 'https://mock.livewall.local/?label=restored&duration=300';
+  await request.delete(`/api/playback-progress?sourceUrl=${encodeURIComponent(sourceUrl)}`);
+  const savedPosition = async () =>
+    (await request.get('/api/playback-progress').then((response) => response.json())).entries.find(
+      (entry: { key: string }) => entry.key === sourceUrl,
+    )?.position;
+  await request.put('/api/state', {
+    data: {
+      version: 0,
+      updatedAt: Date.now(),
+      layoutMode: 'automatic',
+      tiles: [
+        {
+          id: 'restored-vod',
+          name: 'Restored VOD',
+          titleMode: 'manual',
+          source: { type: 'mock', url: sourceUrl },
+          playback: { behavior: 'specific', specificTime: 85 },
+          x: 0,
+          y: 0,
+          w: 12,
+          h: 12,
+          muted: true,
+          volume: 55,
+          displayOrder: 0,
+        },
+      ],
+    },
+  });
+  const context = await browser.newContext();
+  const admin = await context.newPage();
+  let wall = await context.newPage();
+  await Promise.all([admin.goto('/admin'), wall.goto('/wall')]);
+  const instance = await wall.locator('.mock-player').getAttribute('data-instance-id');
+  await expect(wall.locator('.mock-player')).toHaveAttribute('data-position', '85');
+  await admin.locator('[data-testid="admin-tile"]').getByRole('button', { name: 'Pause' }).click();
+  await expect.poll(savedPosition).toBe(85);
+  await expect(wall.locator('.mock-player')).toHaveAttribute('data-instance-id', instance!);
+
+  await wall.close();
+  wall = await context.newPage();
+  await wall.goto('/wall');
+  await expect(wall.locator('.mock-player')).toBeVisible();
+  admin.once('dialog', (dialog) => dialog.accept());
+  await admin.getByRole('button', { name: 'Stop All' }).click();
+  await expect(wall.locator('.mock-player')).toHaveCount(0);
+  await expect.poll(savedPosition).toBe(85);
+  await admin.getByRole('button', { name: 'Resume All' }).click();
+  await expect(wall.locator('.mock-player')).toBeVisible();
   await context.close();
 });

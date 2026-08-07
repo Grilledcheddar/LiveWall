@@ -26,6 +26,19 @@ export function WallPage() {
   const appearance = normalizeAppearance(state.appearance);
   const overlayMode = normalizeOverlayMode(state.overlayMode);
   const grid = automaticGrid(tiles.length);
+  const wallLayout = tiles.map((tile, index) => {
+    if (state.layoutMode !== 'automatic')
+      return { i: tile.id, x: tile.x, y: tile.y, w: tile.w, h: tile.h };
+    const width = 12 / grid.columns;
+    const height = 12 / grid.rows;
+    return {
+      i: tile.id,
+      x: (index % grid.columns) * width,
+      y: Math.floor(index / grid.columns) * height,
+      w: width,
+      h: height,
+    };
+  });
   const [controlsVisible, setControlsVisible] = useState(true);
   const [fullscreen, setFullscreen] = useState(Boolean(document.fullscreenElement));
   const [fullscreenError, setFullscreenError] = useState('');
@@ -135,52 +148,10 @@ export function WallPage() {
           <p>Add a source from the Admin window. It will appear here automatically.</p>
           <a href="/admin">Open Admin</a>
         </div>
-      ) : state.layoutMode === 'automatic' ? (
-        <section
-          className="auto-wall"
-          style={{
-            gridTemplateColumns: `repeat(${grid.columns}, 1fr)`,
-            gridTemplateRows: `repeat(${grid.rows}, 1fr)`,
-          }}
-        >
-          {tiles.map((tile) => (
-            <div
-              key={tile.id}
-              className={`wall-tile-host ${state.focusedTileId === tile.id ? 'focused' : 'unfocused'}`}
-            >
-              <PlayerTile
-                tile={tile}
-                command={lastCommand}
-                stopped={state.globallyStopped}
-                overlayMode={overlayMode}
-                focused={state.focusedTileId === tile.id}
-                activeAudio={state.activeAudioTileId === tile.id}
-                onHealth={reportHealth}
-                progress={progress?.entries?.find(
-                  (entry) => entry.key === playbackKey(tile.source),
-                )}
-                onPlaybackProgress={reportPlaybackProgress}
-              />
-              <button
-                className="tile-focus-button"
-                aria-label={`Focus ${tile.name}`}
-                onClick={() => void save((current) => ({ ...current, focusedTileId: tile.id }))}
-              >
-                <Focus size={15} />
-              </button>
-            </div>
-          ))}
-        </section>
       ) : (
         <GridLayout
-          className="freeform-wall"
-          layout={tiles.map((tile) => ({
-            i: tile.id,
-            x: tile.x,
-            y: tile.y,
-            w: tile.w,
-            h: tile.h,
-          }))}
+          className={state.layoutMode === 'automatic' ? 'auto-wall' : 'freeform-wall'}
+          layout={wallLayout}
           cols={12}
           rowHeight={window.innerHeight / 12}
           width={window.innerWidth}

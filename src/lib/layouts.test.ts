@@ -57,7 +57,13 @@ describe('P3 layouts', () => {
       queuedSource: detectSource('https://example.com/q.m3u8'),
       volume: 33,
     };
-    const current = { ...emptyState(), tiles: [currentTile], activeAudioTileId: currentTile.id };
+    const current = {
+      ...emptyState(),
+      tiles: [currentTile],
+      activeAudioTileId: currentTile.id,
+      overlayMode: 'off' as const,
+      appearance: { ...emptyState().appearance, backgroundColor: '#123456' },
+    };
     const preset = applyLayoutTemplate(
       { ...emptyState(), tiles: [tile('Preset')] },
       BUILT_IN_LAYOUTS[0],
@@ -70,6 +76,8 @@ describe('P3 layouts', () => {
       volume: 33,
     });
     expect(result.activeAudioTileId).toBe(currentTile.id);
+    expect(result.overlayMode).toBe('off');
+    expect(result.appearance.backgroundColor).toBe('#123456');
   });
 
   it('normalizes custom template names and invalid data', () => {

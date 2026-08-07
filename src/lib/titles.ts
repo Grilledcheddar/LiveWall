@@ -2,6 +2,7 @@ import type { VideoSource } from './types.js';
 
 export function fallbackTitle(source: VideoSource): string {
   if (source.type === 'youtube') return 'YouTube video';
+  if (source.type === 'youtube-playlist') return 'YouTube playlist';
   try {
     const hostname = new URL(source.url).hostname.replace(/^www\./, '');
     return hostname || (source.type === 'hls' ? 'HLS stream' : 'Video source');

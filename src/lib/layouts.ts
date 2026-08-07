@@ -211,8 +211,6 @@ export function layoutOnlyState(current: WallState, preset: WallState): WallStat
     layoutMode: preset.layoutMode,
     activeLayoutId: preset.activeLayoutId,
     layoutSlots: preset.layoutSlots,
-    appearance: preset.appearance,
-    overlayMode: preset.overlayMode,
     tiles: current.tiles.map((tile) => ({
       ...sourceFields.get(tile.id)!,
       ...positions.get(tile.id)!,
