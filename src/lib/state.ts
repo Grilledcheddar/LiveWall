@@ -7,8 +7,9 @@ import type {
   WallState,
 } from './types.js';
 import { emptyLibrary, normalizeSourceLibrary, recordLibraryUse } from './library.js';
-import { normalizeLayoutSlots } from './layouts.js';
+import { normalizeFreeformLayout, normalizeLayoutSlots } from './layouts.js';
 import { defaultStartBehavior, normalizePlaybackStart } from './playback.js';
+import { normalizeQualityPreferences } from './quality.js';
 
 export const DEFAULT_APPEARANCE: Readonly<WallAppearance> = Object.freeze({
   backgroundColor: '#020305',
@@ -29,6 +30,7 @@ export const emptyState = (): WallState => ({
   overlayMode: 'hover',
   appearance: defaultAppearance(),
   library: emptyLibrary(),
+  qualityPreferences: {},
 });
 
 export function defaultAppearance() {
@@ -184,12 +186,6 @@ export function normalizeWallState(input: unknown): WallState {
         ? input.updatedAt
         : Date.now(),
     layoutMode: input.layoutMode as WallState['layoutMode'],
-    activeLayoutId:
-      input.layoutMode === 'template' && typeof input.activeLayoutId === 'string'
-        ? input.activeLayoutId
-        : undefined,
-    layoutSlots:
-      input.layoutMode === 'template' ? normalizeLayoutSlots(input.layoutSlots, 12, 12) : undefined,
     tiles,
     activeAudioTileId:
       typeof input.activeAudioTileId === 'string' && tileIds.has(input.activeAudioTileId)
@@ -203,6 +199,13 @@ export function normalizeWallState(input: unknown): WallState {
     overlayMode: normalizeOverlayMode(input.overlayMode),
     appearance: normalizeAppearance(input.appearance),
     library: normalizeSourceLibrary(input.library),
+    activeLayoutId:
+      typeof input.activeLayoutId === 'string' && input.activeLayoutId
+        ? input.activeLayoutId
+        : undefined,
+    layoutSlots: normalizeLayoutSlots(input.layoutSlots, 12, 12),
+    freeformLayout: normalizeFreeformLayout(input.freeformLayout, 12, 12),
+    qualityPreferences: normalizeQualityPreferences(input.qualityPreferences),
   };
 }
 

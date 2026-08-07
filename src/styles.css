@@ -1610,6 +1610,74 @@ a {
   background: #11161d;
   color-scheme: dark;
 }
+.collapsible-section {
+  margin: 22px 0;
+  border: 1px solid #26303c;
+  border-radius: 14px;
+  background: #11161d;
+  overflow: clip;
+}
+.collapsible-section-header.lw-button {
+  width: 100%;
+  min-height: 54px;
+  justify-content: flex-start;
+  padding: 12px 16px;
+  border: 0;
+  border-radius: 0;
+  text-align: left;
+}
+.collapsible-section-header svg {
+  flex: 0 0 auto;
+}
+.collapsible-section-header span {
+  font-size: 15px;
+}
+.collapsible-section-header small {
+  margin-left: auto;
+  color: #aab5c2;
+  font-size: 12px;
+  font-weight: 600;
+}
+.collapsible-section-content {
+  padding-top: 14px;
+}
+.quality-settings {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid #344253;
+  border-radius: 8px;
+  background: #0d141b;
+}
+.quality-settings label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #f1f5fa;
+  font-weight: 700;
+}
+.quality-settings small {
+  color: #b8c4d1;
+}
+.section-visibility-actions {
+  display: flex;
+  gap: 6px;
+}
+.section-visibility-actions .lw-button {
+  min-height: 34px;
+  padding: 6px 10px;
+  font-size: 11px;
+}
+.folder-collapse.lw-button {
+  min-width: 170px;
+  justify-content: flex-start;
+}
+.folder-collapse small {
+  margin-left: auto;
+}
 
 /*
  * Source Library controls deliberately define their complete enabled state.

@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import { Button } from './Button';
+import { CollapsibleHeader } from './CollapsibleHeader';
+import { useLocalStorageState } from '../hooks/useLocalStorageState';
 import {
   clearLibraryRecents,
   createLibraryFolder,
@@ -29,6 +32,8 @@ interface Props {
   saveLibrary: (library: SourceLibrary) => Promise<unknown>;
   importLibrary: (payload: unknown) => Promise<{ state: WallState; backupPath: string }>;
   onFeedback: (message: string) => void;
+  collapsed?: boolean;
+  onToggleCollapsed?: () => void;
 }
 
 export function SourceLibraryPanel({
@@ -37,6 +42,8 @@ export function SourceLibraryPanel({
   saveLibrary,
   importLibrary,
   onFeedback,
+  collapsed = false,
+  onToggleCollapsed = () => undefined,
 }: Props) {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<LibraryFilter>('all');
@@ -44,6 +51,10 @@ export function SourceLibraryPanel({
   const [folderId, setFolderId] = useState('all');
   const [sort, setSort] = useState<LibrarySort>('recent');
   const [targetTileId, setTargetTileId] = useState(state.tiles[0]?.id ?? '');
+  const [collapsedFolders, setCollapsedFolders] = useLocalStorageState<Record<string, boolean>>(
+    'livewall.admin.library-folders.v1',
+    {},
+  );
   const [pendingImport, setPendingImport] = useState<{
     payload: unknown;
     preview: LibraryImportPreview;
@@ -57,6 +68,9 @@ export function SourceLibraryPanel({
   const resolvedTargetTileId = state.tiles.some((tile) => tile.id === targetTileId)
     ? targetTileId
     : (state.tiles[0]?.id ?? '');
+  const visibleEntries = entries.filter(
+    (entry) => !entry.folderId || !collapsedFolders[entry.folderId],
+  );
 
   useEffect(() => {
     if (!pendingImport) return;
@@ -225,381 +239,425 @@ export function SourceLibraryPanel({
 
   return (
     <section className="source-library" aria-label="Source Library">
-      <div className="panel-heading library-heading">
-        <div>
-          <span className="eyebrow">REUSABLE SOURCES</span>
-          <h2>Source Library</h2>
-          <p>Save channels, live cameras, HLS feeds, and best-effort websites for reuse.</p>
-        </div>
-        <div className="library-file-actions">
-          <a className="library-action" href="/api/library/export" download>
-            Export
-          </a>
-          <Button
-            variant="secondary"
-            ref={importTrigger}
-            className="library-action"
-            onClick={() => importInput.current?.click()}
-          >
-            Import
-          </Button>
-          <input
-            ref={importInput}
-            type="file"
-            accept="application/json,.json"
-            hidden
-            onChange={(event) => void loadImport(event.target.files?.[0])}
-          />
-          <Button variant="primary" onClick={() => void createFolder()}>
-            New folder
-          </Button>
-          <Button
-            variant="secondary"
-            disabled={!state.library.entries.some((entry) => entry.recent)}
-            title={
-              state.library.entries.some((entry) => entry.recent)
-                ? 'Remove automatic Recent labels without deleting saved sources.'
-                : 'There are no Recent entries to clear.'
-            }
-            onClick={() => {
-              if (
-                confirm('Clear recent sources? Saved sources, favorites, and active tiles remain.')
-              )
-                void saveLibrary(clearLibraryRecents(state.library));
-            }}
-          >
-            Clear Recents
-          </Button>
-        </div>
-      </div>
-
-      <div className="folder-manager">
-        {state.library.folders.map((folder, index) => (
-          <div key={folder.id}>
-            <strong>{folder.name}</strong>
-            <Button
-              variant="ghost"
-              aria-label={`Move ${folder.name} up`}
-              disabled={index === 0}
-              onClick={() => void saveLibrary(moveLibraryFolder(state.library, folder.id, -1))}
-            >
-              ↑
-            </Button>
-            <Button
-              variant="ghost"
-              aria-label={`Move ${folder.name} down`}
-              disabled={index === state.library.folders.length - 1}
-              onClick={() => void saveLibrary(moveLibraryFolder(state.library, folder.id, 1))}
-            >
-              ↓
-            </Button>
-            <Button variant="secondary" onClick={() => void renameFolder(folder.id, folder.name)}>
-              Rename
-            </Button>
-            <Button variant="destructive" onClick={() => void removeFolder(folder.id, folder.name)}>
-              Delete
-            </Button>
+      <CollapsibleHeader
+        title="Source Library"
+        summary={`${state.library.entries.length} source${state.library.entries.length === 1 ? '' : 's'}, ${state.library.entries.filter((entry) => entry.favorite).length} favorite${state.library.entries.filter((entry) => entry.favorite).length === 1 ? '' : 's'}`}
+        expanded={!collapsed}
+        onToggle={onToggleCollapsed}
+      />
+      {!collapsed && (
+        <div className="collapsible-section-content">
+          <div className="panel-heading library-heading">
+            <div>
+              <span className="eyebrow">REUSABLE SOURCES</span>
+              <h2>Source Library</h2>
+              <p>Save channels, live cameras, HLS feeds, and best-effort websites for reuse.</p>
+            </div>
+            <div className="library-file-actions">
+              <a className="library-action" href="/api/library/export" download>
+                Export
+              </a>
+              <Button
+                variant="secondary"
+                ref={importTrigger}
+                className="library-action"
+                onClick={() => importInput.current?.click()}
+              >
+                Import
+              </Button>
+              <input
+                ref={importInput}
+                type="file"
+                accept="application/json,.json"
+                hidden
+                onChange={(event) => void loadImport(event.target.files?.[0])}
+              />
+              <Button variant="primary" onClick={() => void createFolder()}>
+                New folder
+              </Button>
+              <Button
+                variant="secondary"
+                disabled={!state.library.entries.some((entry) => entry.recent)}
+                title={
+                  state.library.entries.some((entry) => entry.recent)
+                    ? 'Remove automatic Recent labels without deleting saved sources.'
+                    : 'There are no Recent entries to clear.'
+                }
+                onClick={() => {
+                  if (
+                    confirm(
+                      'Clear recent sources? Saved sources, favorites, and active tiles remain.',
+                    )
+                  )
+                    void saveLibrary(clearLibraryRecents(state.library));
+                }}
+              >
+                Clear Recents
+              </Button>
+            </div>
           </div>
-        ))}
-      </div>
 
-      <div className="library-controls">
-        <label>
-          Search{' '}
-          <input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Title, URL, hostname, or folder"
-          />
-        </label>
-        <label>
-          Show{' '}
-          <select
-            value={filter}
-            onChange={(event) => setFilter(event.target.value as LibraryFilter)}
-          >
-            <option value="all">All</option>
-            <option value="saved">Saved</option>
-            <option value="favorites">Favorites</option>
-            <option value="recents">Recents</option>
-          </select>
-        </label>
-        <label>
-          Type{' '}
-          <select value={type} onChange={(event) => setType(event.target.value)}>
-            <option value="all">All types</option>
-            <option value="youtube">YouTube</option>
-            <option value="youtube-playlist">YouTube playlists</option>
-            <option value="hls">HLS / M3U8</option>
-            <option value="website">Website</option>
-          </select>
-        </label>
-        <label>
-          Folder{' '}
-          <select value={folderId} onChange={(event) => setFolderId(event.target.value)}>
-            <option value="all">All folders</option>
-            <option value="unfiled">Unfiled</option>
-            {state.library.folders.map((folder) => (
-              <option key={folder.id} value={folder.id}>
-                {folder.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Sort{' '}
-          <select value={sort} onChange={(event) => setSort(event.target.value as LibrarySort)}>
-            <option value="recent">Recently used</option>
-            <option value="name">Name</option>
-            <option value="used">Most used</option>
-          </select>
-        </label>
-        <label>
-          Target tile{' '}
-          <select
-            value={resolvedTargetTileId}
-            onChange={(event) => setTargetTileId(event.target.value)}
-          >
-            <option value="">Choose a tile</option>
-            {state.tiles.map((tile) => (
-              <option key={tile.id} value={tile.id}>
-                {tile.name}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-
-      {!entries.length ? (
-        <div className="library-empty">
-          No matching sources. Add or queue a source to create an automatic Recent. Use Save to
-          Library to keep it for reuse, then optionally add it to Favorites.
-        </div>
-      ) : (
-        <div className="library-list">
-          {entries.map((entry) => {
-            const folder = state.library.folders.find((item) => item.id === entry.folderId);
-            return (
-              <article className="library-source-row" key={entry.id} data-library-id={entry.id}>
+          <div className="folder-manager">
+            {state.library.folders.map((folder, index) => (
+              <div key={folder.id}>
                 <Button
                   variant="ghost"
-                  className="favorite-star"
-                  disabled={!entry.saved}
-                  aria-label={
-                    entry.favorite
-                      ? `Remove ${entry.title} from favorites`
-                      : `Add ${entry.title} to favorites`
+                  className="folder-collapse"
+                  aria-expanded={!collapsedFolders[folder.id]}
+                  onClick={() =>
+                    setCollapsedFolders((current) => ({
+                      ...current,
+                      [folder.id]: !current[folder.id],
+                    }))
                   }
-                  title={
-                    entry.saved
-                      ? entry.favorite
-                        ? 'Remove from favorites'
-                        : 'Add this saved source to favorites'
-                      : 'Save to Library before adding this source to favorites.'
-                  }
-                  onClick={() => void favorite(entry)}
                 >
-                  {entry.favorite ? '★ Favorited' : '☆ Add to favorites'}
-                </Button>
-                <div className="library-source-copy">
-                  <strong>{entry.title}</strong>
-                  <span className="library-entry-labels">
-                    {entry.source.type === 'website'
-                      ? 'WEBSITE · BEST EFFORT'
-                      : entry.source.type.toUpperCase()}
-                    {entry.recent && <b>Recent</b>}
-                    {entry.saved && <b>Saved</b>}
-                    {entry.favorite && <b>Favorite</b>}
-                  </span>
-                  <small>{entry.originalUrl}</small>
+                  {collapsedFolders[folder.id] ? (
+                    <ChevronRight size={16} />
+                  ) : (
+                    <ChevronDown size={16} />
+                  )}{' '}
+                  {folder.name}
                   <small>
-                    {folder?.name ?? 'Unfiled'} · Used {entry.useCount} time
-                    {entry.useCount === 1 ? '' : 's'} ·{' '}
-                    {new Date(entry.lastUsedAt).toLocaleString()}
+                    {state.library.entries.filter((entry) => entry.folderId === folder.id).length}
                   </small>
-                </div>
-                {entry.saved && (
-                  <div className="library-metadata-actions">
+                </Button>
+                <Button
+                  variant="ghost"
+                  aria-label={`Move ${folder.name} up`}
+                  disabled={index === 0}
+                  onClick={() => void saveLibrary(moveLibraryFolder(state.library, folder.id, -1))}
+                >
+                  ↑
+                </Button>
+                <Button
+                  variant="ghost"
+                  aria-label={`Move ${folder.name} down`}
+                  disabled={index === state.library.folders.length - 1}
+                  onClick={() => void saveLibrary(moveLibraryFolder(state.library, folder.id, 1))}
+                >
+                  ↓
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => void renameFolder(folder.id, folder.name)}
+                >
+                  Rename
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={() => void removeFolder(folder.id, folder.name)}
+                >
+                  Delete
+                </Button>
+              </div>
+            ))}
+          </div>
+
+          <div className="library-controls">
+            <label>
+              Search{' '}
+              <input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Title, URL, hostname, or folder"
+              />
+            </label>
+            <label>
+              Show{' '}
+              <select
+                value={filter}
+                onChange={(event) => setFilter(event.target.value as LibraryFilter)}
+              >
+                <option value="all">All</option>
+                <option value="saved">Saved</option>
+                <option value="favorites">Favorites</option>
+                <option value="recents">Recents</option>
+              </select>
+            </label>
+            <label>
+              Type{' '}
+              <select value={type} onChange={(event) => setType(event.target.value)}>
+                <option value="all">All types</option>
+                <option value="youtube">YouTube</option>
+                <option value="youtube-playlist">YouTube playlists</option>
+                <option value="hls">HLS / M3U8</option>
+                <option value="website">Website</option>
+              </select>
+            </label>
+            <label>
+              Folder{' '}
+              <select value={folderId} onChange={(event) => setFolderId(event.target.value)}>
+                <option value="all">All folders</option>
+                <option value="unfiled">Unfiled</option>
+                {state.library.folders.map((folder) => (
+                  <option key={folder.id} value={folder.id}>
+                    {folder.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Sort{' '}
+              <select value={sort} onChange={(event) => setSort(event.target.value as LibrarySort)}>
+                <option value="recent">Recently used</option>
+                <option value="name">Name</option>
+                <option value="used">Most used</option>
+              </select>
+            </label>
+            <label>
+              Target tile{' '}
+              <select
+                value={resolvedTargetTileId}
+                onChange={(event) => setTargetTileId(event.target.value)}
+              >
+                <option value="">Choose a tile</option>
+                {state.tiles.map((tile) => (
+                  <option key={tile.id} value={tile.id}>
+                    {tile.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          {!visibleEntries.length ? (
+            <div className="library-empty">
+              {entries.length
+                ? 'Matching sources are inside collapsed folders.'
+                : 'No matching sources. Add or queue a source to create an automatic Recent. Use Save to Library to keep it for reuse, then optionally add it to Favorites.'}
+            </div>
+          ) : (
+            <div className="library-list">
+              {visibleEntries.map((entry) => {
+                const folder = state.library.folders.find((item) => item.id === entry.folderId);
+                return (
+                  <article className="library-source-row" key={entry.id} data-library-id={entry.id}>
                     <Button
-                      variant="secondary"
-                      onClick={() => {
-                        const title = prompt('Saved source display name', entry.title);
-                        if (title !== null)
-                          void saveLibrary(updateLibraryEntry(state.library, entry.id, { title }));
-                      }}
+                      variant="ghost"
+                      className="favorite-star"
+                      disabled={!entry.saved}
+                      aria-label={
+                        entry.favorite
+                          ? `Remove ${entry.title} from favorites`
+                          : `Add ${entry.title} to favorites`
+                      }
+                      title={
+                        entry.saved
+                          ? entry.favorite
+                            ? 'Remove from favorites'
+                            : 'Add this saved source to favorites'
+                          : 'Save to Library before adding this source to favorites.'
+                      }
+                      onClick={() => void favorite(entry)}
                     >
-                      Edit name
+                      {entry.favorite ? '★ Favorited' : '☆ Add to favorites'}
                     </Button>
-                    {entry.titleMode === 'auto' && entry.source.type === 'youtube' && (
+                    <div className="library-source-copy">
+                      <strong>{entry.title}</strong>
+                      <span className="library-entry-labels">
+                        {entry.source.type === 'website'
+                          ? 'WEBSITE · BEST EFFORT'
+                          : entry.source.type.toUpperCase()}
+                        {entry.recent && <b>Recent</b>}
+                        {entry.saved && <b>Saved</b>}
+                        {entry.favorite && <b>Favorite</b>}
+                      </span>
+                      <small>{entry.originalUrl}</small>
+                      <small>
+                        {folder?.name ?? 'Unfiled'} · Used {entry.useCount} time
+                        {entry.useCount === 1 ? '' : 's'} ·{' '}
+                        {new Date(entry.lastUsedAt).toLocaleString()}
+                      </small>
+                    </div>
+                    {entry.saved && (
+                      <div className="library-metadata-actions">
+                        <Button
+                          variant="secondary"
+                          onClick={() => {
+                            const title = prompt('Saved source display name', entry.title);
+                            if (title !== null)
+                              void saveLibrary(
+                                updateLibraryEntry(state.library, entry.id, { title }),
+                              );
+                          }}
+                        >
+                          Edit name
+                        </Button>
+                        {entry.titleMode === 'auto' && entry.source.type === 'youtube' && (
+                          <Button
+                            variant="secondary"
+                            onClick={async () => {
+                              try {
+                                const title = await resolveYouTubeTitle(entry.originalUrl);
+                                await saveLibrary(
+                                  updateLibraryEntry(state.library, entry.id, {
+                                    title,
+                                    titleMode: 'auto',
+                                  }),
+                                );
+                              } catch {
+                                alert('The YouTube title is temporarily unavailable.');
+                              }
+                            }}
+                          >
+                            Refresh title
+                          </Button>
+                        )}
+                        <label>
+                          Folder{' '}
+                          <select
+                            value={entry.folderId ?? ''}
+                            onChange={(event) =>
+                              void saveLibrary(
+                                updateLibraryEntry(state.library, entry.id, {
+                                  folderId: event.target.value || undefined,
+                                }),
+                              )
+                            }
+                          >
+                            <option value="">Unfiled</option>
+                            {state.library.folders.map((item) => (
+                              <option key={item.id} value={item.id}>
+                                {item.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+                    )}
+                    <div className="library-source-actions">
                       <Button
                         variant="secondary"
-                        onClick={async () => {
-                          try {
-                            const title = await resolveYouTubeTitle(entry.originalUrl);
-                            await saveLibrary(
-                              updateLibraryEntry(state.library, entry.id, {
-                                title,
-                                titleMode: 'auto',
-                              }),
-                            );
-                          } catch {
-                            alert('The YouTube title is temporarily unavailable.');
-                          }
-                        }}
-                      >
-                        Refresh title
-                      </Button>
-                    )}
-                    <label>
-                      Folder{' '}
-                      <select
-                        value={entry.folderId ?? ''}
-                        onChange={(event) =>
-                          void saveLibrary(
-                            updateLibraryEntry(state.library, entry.id, {
-                              folderId: event.target.value || undefined,
-                            }),
-                          )
+                        disabled={entry.saved}
+                        title={
+                          entry.saved
+                            ? 'This source is already saved for reuse.'
+                            : 'Save this Recent as a reusable library source.'
                         }
+                        onClick={() => void saveSource(entry)}
                       >
-                        <option value="">Unfiled</option>
-                        {state.library.folders.map((item) => (
-                          <option key={item.id} value={item.id}>
-                            {item.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                        {entry.saved ? 'Saved to Library' : 'Save to Library'}
+                      </Button>
+                      <Button
+                        variant="primary"
+                        disabled={state.tiles.length >= 9}
+                        title={state.tiles.length >= 9 ? 'The wall is full (9 of 9).' : ''}
+                        onClick={() => void addAsTile(entry)}
+                      >
+                        Add as Tile
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        disabled={!state.tiles.length}
+                        title={
+                          !state.tiles.length ? 'Add an active tile before replacing one.' : ''
+                        }
+                        onClick={() => void replaceTile(entry)}
+                      >
+                        Replace Tile
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        disabled={!state.tiles.length}
+                        title={
+                          !state.tiles.length ? 'Add an active tile before queueing a source.' : ''
+                        }
+                        onClick={() => void queueForTile(entry)}
+                      >
+                        Queue for Tile
+                      </Button>
+                      <a href={entry.originalUrl} target="_blank" rel="noreferrer">
+                        Open Externally
+                      </a>
+                      <Button variant="ghost" onClick={() => void copyUrl(entry)}>
+                        Copy URL
+                      </Button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+
+          {pendingImport && (
+            <div
+              className="modal-backdrop"
+              role="presentation"
+              onMouseDown={(event) =>
+                event.target === event.currentTarget && setPendingImport(undefined)
+              }
+            >
+              <div
+                className="source-dialog"
+                role="dialog"
+                aria-modal="true"
+                aria-label="Import preview"
+              >
+                <div className="dialog-heading">
+                  <div>
+                    <span className="eyebrow">IMPORT PREVIEW</span>
+                    <h2>Merge Source Library</h2>
                   </div>
-                )}
-                <div className="library-source-actions">
                   <Button
-                    variant="secondary"
-                    disabled={entry.saved}
-                    title={
-                      entry.saved
-                        ? 'This source is already saved for reuse.'
-                        : 'Save this Recent as a reusable library source.'
-                    }
-                    onClick={() => void saveSource(entry)}
+                    variant="ghost"
+                    type="button"
+                    className="icon-button dialog-close"
+                    aria-label="Close import preview"
+                    onClick={() => setPendingImport(undefined)}
                   >
-                    {entry.saved ? 'Saved to Library' : 'Save to Library'}
+                    ×
+                  </Button>
+                </div>
+                <div className="dialog-body">
+                  <dl className="import-preview">
+                    <div>
+                      <dt>New sources</dt>
+                      <dd>{pendingImport.preview.newSources}</dd>
+                    </div>
+                    <div>
+                      <dt>Duplicates</dt>
+                      <dd>{pendingImport.preview.duplicates}</dd>
+                    </div>
+                    <div>
+                      <dt>Updated metadata</dt>
+                      <dd>{pendingImport.preview.updatedMetadata}</dd>
+                    </div>
+                    <div>
+                      <dt>New folders</dt>
+                      <dd>{pendingImport.preview.newFolders}</dd>
+                    </div>
+                    <div>
+                      <dt>Folder conflicts</dt>
+                      <dd>{pendingImport.preview.conflictingFolders.join(', ') || 'None'}</dd>
+                    </div>
+                  </dl>
+                  <p>
+                    Active wall tiles will not be changed. A state backup is created before this
+                    merge.
+                  </p>
+                </div>
+                <div className="dialog-actions">
+                  <Button variant="secondary" onClick={() => setPendingImport(undefined)}>
+                    Cancel
                   </Button>
                   <Button
                     variant="primary"
-                    disabled={state.tiles.length >= 9}
-                    title={state.tiles.length >= 9 ? 'The wall is full (9 of 9).' : ''}
-                    onClick={() => void addAsTile(entry)}
+                    onClick={async () => {
+                      try {
+                        const result = await importLibrary(pendingImport.payload);
+                        setPendingImport(undefined);
+                        onFeedback(`Import complete. Backup: ${result.backupPath}`);
+                      } catch (error) {
+                        alert(error instanceof Error ? error.message : 'Import failed.');
+                      }
+                    }}
                   >
-                    Add as Tile
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    disabled={!state.tiles.length}
-                    title={!state.tiles.length ? 'Add an active tile before replacing one.' : ''}
-                    onClick={() => void replaceTile(entry)}
-                  >
-                    Replace Tile
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    disabled={!state.tiles.length}
-                    title={
-                      !state.tiles.length ? 'Add an active tile before queueing a source.' : ''
-                    }
-                    onClick={() => void queueForTile(entry)}
-                  >
-                    Queue for Tile
-                  </Button>
-                  <a href={entry.originalUrl} target="_blank" rel="noreferrer">
-                    Open Externally
-                  </a>
-                  <Button variant="ghost" onClick={() => void copyUrl(entry)}>
-                    Copy URL
+                    Apply import
                   </Button>
                 </div>
-              </article>
-            );
-          })}
-        </div>
-      )}
-
-      {pendingImport && (
-        <div
-          className="modal-backdrop"
-          role="presentation"
-          onMouseDown={(event) =>
-            event.target === event.currentTarget && setPendingImport(undefined)
-          }
-        >
-          <div
-            className="source-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Import preview"
-          >
-            <div className="dialog-heading">
-              <div>
-                <span className="eyebrow">IMPORT PREVIEW</span>
-                <h2>Merge Source Library</h2>
               </div>
-              <Button
-                variant="ghost"
-                type="button"
-                className="icon-button dialog-close"
-                aria-label="Close import preview"
-                onClick={() => setPendingImport(undefined)}
-              >
-                ×
-              </Button>
             </div>
-            <div className="dialog-body">
-              <dl className="import-preview">
-                <div>
-                  <dt>New sources</dt>
-                  <dd>{pendingImport.preview.newSources}</dd>
-                </div>
-                <div>
-                  <dt>Duplicates</dt>
-                  <dd>{pendingImport.preview.duplicates}</dd>
-                </div>
-                <div>
-                  <dt>Updated metadata</dt>
-                  <dd>{pendingImport.preview.updatedMetadata}</dd>
-                </div>
-                <div>
-                  <dt>New folders</dt>
-                  <dd>{pendingImport.preview.newFolders}</dd>
-                </div>
-                <div>
-                  <dt>Folder conflicts</dt>
-                  <dd>{pendingImport.preview.conflictingFolders.join(', ') || 'None'}</dd>
-                </div>
-              </dl>
-              <p>
-                Active wall tiles will not be changed. A state backup is created before this merge.
-              </p>
-            </div>
-            <div className="dialog-actions">
-              <Button variant="secondary" onClick={() => setPendingImport(undefined)}>
-                Cancel
-              </Button>
-              <Button
-                variant="primary"
-                onClick={async () => {
-                  try {
-                    const result = await importLibrary(pendingImport.payload);
-                    setPendingImport(undefined);
-                    onFeedback(`Import complete. Backup: ${result.backupPath}`);
-                  } catch (error) {
-                    alert(error instanceof Error ? error.message : 'Import failed.');
-                  }
-                }}
-              >
-                Apply import
-              </Button>
-            </div>
-          </div>
+          )}
         </div>
       )}
     </section>

@@ -34,8 +34,11 @@ import { Button } from '../components/Button';
 import { SourceLibraryPanel } from '../components/SourceLibraryPanel';
 import { P3WorkspacePanel } from '../components/P3WorkspacePanel';
 import { useWall } from '../hooks/useWall';
+import { useLocalStorageState } from '../hooks/useLocalStorageState';
 import { normalizeSourceLibrary, saveLibrarySource, setLibraryFavorite } from '../lib/library';
+import { activateAutomaticLayout, activateFreeformLayout } from '../lib/layouts';
 import { canonicalSourceUrl, detectSource } from '../lib/sources';
+import { hlsQualityLabel, qualityPreferenceForLevel, qualityPreferenceValue } from '../lib/quality';
 import {
   defaultAppearance,
   moveTile,
@@ -62,6 +65,7 @@ import type {
   PlaybackStart,
   PlayerCommandName,
   PlayerHealth,
+  QualityPreference,
   Tile,
   VideoSource,
   WallAppearance,
@@ -446,6 +450,8 @@ function TileCard({
   onToggleFavorite,
   progress,
   onClearPosition,
+  qualityPreference,
+  onQualityPreference,
 }: {
   tile: Tile;
   isActiveAudio: boolean;
@@ -470,6 +476,8 @@ function TileCard({
   onToggleFavorite: () => Promise<unknown>;
   progress?: PlaybackProgress;
   onClearPosition: () => Promise<unknown>;
+  qualityPreference?: QualityPreference;
+  onQualityPreference: (preference: QualityPreference) => Promise<unknown>;
 }) {
   const [queueUrl, setQueueUrl] = useState('');
   const [delay, setDelay] = useState(60);
@@ -657,6 +665,58 @@ function TileCard({
           Clear Saved Position
         </Button>
         <small>Changes apply the next time you restart or reload this source.</small>
+      </div>
+      <div className="quality-settings">
+        {tile.source.type === 'youtube' || tile.source.type === 'youtube-playlist' ? (
+          <>
+            <strong>Quality: YouTube Auto</strong>
+            <small title="YouTube controls quality automatically. Use the gear on the Wall player to change it manually.">
+              YouTube controls quality automatically. Use the gear on the Wall player to change it
+              manually.
+            </small>
+          </>
+        ) : tile.source.type === 'hls' ? (
+          <>
+            <label>
+              Quality
+              <select
+                aria-label={`Quality for ${tile.name}`}
+                value={health?.qualityFallback ? 'auto' : qualityPreferenceValue(qualityPreference)}
+                onChange={(event) => {
+                  const level = health?.qualityLevels?.find(
+                    (candidate) =>
+                      qualityPreferenceValue(qualityPreferenceForLevel(candidate)) ===
+                      event.target.value,
+                  );
+                  void onQualityPreference(
+                    event.target.value === 'auto' || !level
+                      ? { mode: 'auto' }
+                      : qualityPreferenceForLevel(level),
+                  );
+                }}
+              >
+                <option value="auto">Auto (adaptive)</option>
+                {health?.qualityLevels?.map((level) => (
+                  <option
+                    key={`${level.index}-${level.height}-${level.bitrate}`}
+                    value={qualityPreferenceValue(qualityPreferenceForLevel(level))}
+                  >
+                    {hlsQualityLabel(level)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <small>
+              {health?.qualityFallback
+                ? 'The saved level is unavailable; safely using Auto.'
+                : health?.qualityCurrentLevel !== undefined && health.qualityCurrentLevel >= 0
+                  ? `Playing ${hlsQualityLabel(health.qualityLevels?.find((level) => level.index === health.qualityCurrentLevel) ?? {})}`
+                  : 'Playing level: Auto selecting'}
+            </small>
+          </>
+        ) : (
+          <strong>Quality: Provider controlled.</strong>
+        )}
       </div>
       {tile.source.type === 'youtube-playlist' && (
         <div className="playlist-status">
@@ -889,6 +949,10 @@ export function AdminPage() {
   } = useWall();
   const [dialog, setDialog] = useState<DialogState>();
   const [layoutEditing, setLayoutEditing] = useState(false);
+  const [collapsedSections, setCollapsedSections] = useLocalStorageState(
+    'livewall.admin.sections.v1',
+    { library: false, layouts: false, walls: false },
+  );
   const [draggedTileId, setDraggedTileId] = useState<string>();
   const [globalMessage, setGlobalMessage] = useState('');
   const [wallSessionStatus, setWallSessionStatus] = useState('checking');
@@ -989,6 +1053,13 @@ export function AdminPage() {
   function saveLayout(layout: Layout[]) {
     void patchState((current) => ({
       ...current,
+      freeformLayout: layout.map((item) => ({
+        id: item.i,
+        column: item.x + 1,
+        row: item.y + 1,
+        columnSpan: item.w,
+        rowSpan: item.h,
+      })),
       tiles: current.tiles.map((tile) => {
         const item = layout.find((entry) => entry.i === tile.id);
         return item ? { ...tile, x: item.x, y: item.y, w: item.w, h: item.h } : tile;
@@ -1043,6 +1114,14 @@ export function AdminPage() {
       ...current,
       appearance: { ...normalizeAppearance(current.appearance), ...change },
     }));
+  }
+
+  function setEverySection(collapsed: boolean) {
+    setCollapsedSections({ library: collapsed, layouts: collapsed, walls: collapsed });
+  }
+
+  function toggleSection(section: keyof typeof collapsedSections) {
+    setCollapsedSections((current) => ({ ...current, [section]: !current[section] }));
   }
 
   return (
@@ -1125,6 +1204,14 @@ export function AdminPage() {
                   : 'Reopen on Monitor 2 in kiosk mode.'}
               </small>
             </div>
+            <div className="section-visibility-actions" aria-label="Admin section visibility">
+              <Button variant="ghost" onClick={() => setEverySection(true)}>
+                Collapse All
+              </Button>
+              <Button variant="ghost" onClick={() => setEverySection(false)}>
+                Expand All
+              </Button>
+            </div>
             <Button
               variant="primary"
               disabled={state.tiles.length >= 9}
@@ -1153,9 +1240,7 @@ export function AdminPage() {
               variant="ghost"
               className={state.layoutMode === 'automatic' ? 'selected' : ''}
               aria-pressed={state.layoutMode === 'automatic'}
-              onClick={() =>
-                void patchState((current) => ({ ...current, layoutMode: 'automatic' }))
-              }
+              onClick={() => void patchState(activateAutomaticLayout)}
             >
               <Grid2X2 size={15} /> Auto
             </Button>
@@ -1164,7 +1249,7 @@ export function AdminPage() {
               className={state.layoutMode === 'freeform' ? 'selected' : ''}
               aria-pressed={state.layoutMode === 'freeform'}
               onClick={() => {
-                void patchState((current) => ({ ...current, layoutMode: 'freeform' }));
+                void patchState(activateFreeformLayout);
                 setLayoutEditing(true);
               }}
             >
@@ -1354,6 +1439,11 @@ export function AdminPage() {
           saveTemplates={saveTemplates}
           savePresets={savePresets}
           onFeedback={setGlobalMessage}
+          collapsed={{
+            walls: collapsedSections.walls,
+            layouts: collapsedSections.layouts,
+          }}
+          onToggleCollapsed={toggleSection}
         />
         <SourceLibraryPanel
           state={{ ...state, library: normalizeSourceLibrary(state.library) }}
@@ -1361,6 +1451,8 @@ export function AdminPage() {
           saveLibrary={saveLibrary}
           importLibrary={importLibrary}
           onFeedback={setGlobalMessage}
+          collapsed={collapsedSections.library}
+          onToggleCollapsed={() => toggleSection('library')}
         />
         {state.tiles.length === 0 ? (
           <section className="admin-empty">
@@ -1452,6 +1544,16 @@ export function AdminPage() {
                     (entry) => entry.key === playbackKey(tile.source),
                   )}
                   onClearPosition={() => clearPlaybackProgress(tile.source.url)}
+                  qualityPreference={state.qualityPreferences?.[canonicalSourceUrl(tile.source)]}
+                  onQualityPreference={(preference) =>
+                    patchState((current) => ({
+                      ...current,
+                      qualityPreferences: {
+                        ...current.qualityPreferences,
+                        [canonicalSourceUrl(tile.source)]: preference,
+                      },
+                    }))
+                  }
                   onCommand={(name, value) => {
                     if (name === 'unmute') void setAudio(tile.id);
                     else {

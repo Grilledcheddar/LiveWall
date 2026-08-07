@@ -33,7 +33,7 @@ LiveWall only listens on `127.0.0.1`. Other computers on the network cannot conn
 - Paste a URL under **Up Next** and choose **Queue**. Then choose **Play Next**, or enter a delay in seconds and choose **Schedule**.
 - **Cancel** clears both the queued source and timer.
 - Select a muted tile’s audio button to make it the active audio source. Every other tile is muted automatically.
-- Choose **Freeform** to drag and resize the layout. Switching back to Auto does not erase the freeform arrangement.
+- Choose **Freeform** to drag and resize the layout. Auto uses deterministic, non-overlapping arrangements from one tile through nine; switching among Auto, Freeform, and a Custom layout keeps each inactive arrangement for later use.
 - Double-click a tile card to make it the active audio source.
 - YouTube sources default to an automatic title from YouTube oEmbed. Typing your own title switches the tile to manual mode; automatic titles can be refreshed explicitly.
 - Move the pointer over the Wall to reveal **Enter Fullscreen**. The control hides after a short period; press `Escape` or use **Exit Fullscreen** to leave.
@@ -50,7 +50,9 @@ LiveWall only listens on `127.0.0.1`. Other computers on the network cannot conn
 - Choose a source's **Start Behavior**: live edge, resume, a validated timestamp such as `1:25:30`, or the beginning. **Restart**, **Go Live**, and **Clear Saved Position** are explicit actions and changing the saved behavior does not reload a playing source.
 - YouTube playlist URLs and playlist IDs are saved as one reusable playlist source. Playlists advance in order, provide Previous/Next and position details, skip unavailable items with a warning, and stop after the final item. Shuffle and repeat are intentionally not part of P3.
 - **Layouts** contains visual previews for eleven built-in arrangements. Previewing is required before apply, and layouts with too few slots are blocked without hiding tiles. Custom layouts support up to nine numbered, grid-snapped rectangular slots with validation, Undo, Reset, Preview, rename, duplicate, edit, and delete.
+- **Source Library**, **Wall Layouts**, and **Named Walls** can be collapsed independently; their state is kept only in that Admin browser. Library folders can also be collapsed without changing sources, folders, filters, or the wall.
 - **Named Walls** stores explicit snapshots. Preview a preset before replacing the workspace, or apply only its layout. Live edits continue to autosave for recovery but never overwrite a preset until **Update Preset** is chosen; **Save As** makes an independent preset.
+- Quality controls are capability-aware. YouTube continues to choose quality automatically and exposes its native Wall-player gear; generic embeds remain provider-controlled. HLS starts in adaptive **Auto**, lists manifest resolutions/bitrates, and uses a next-segment switch for a saved per-source manual preference. A missing saved level safely falls back to Auto.
 
 Volume changes are sent directly to the selected player while the slider moves and saved after a short debounce. They do not reload the Wall or recreate players.
 

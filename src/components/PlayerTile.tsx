@@ -2,14 +2,17 @@ import Hls from 'hls.js';
 import { ExternalLink, LoaderCircle, MonitorX, RotateCw, Square } from 'lucide-react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import type {
+  HlsQualityLevel,
   OverlayMode,
   PlayerCommand,
   PlayerHealth,
   PlayerHealthStatus,
   Tile,
   PlaybackProgress,
+  QualityPreference,
 } from '../lib/types';
 import { resumeTarget, PROGRESS_INTERVAL_MS } from '../lib/playback';
+import { resolveHlsQualityLevel } from '../lib/quality';
 
 interface Adapter {
   play(): void | Promise<void>;
@@ -78,6 +81,7 @@ export const PlayerTile = memo(function PlayerTile({
   progress,
   onPlaybackProgress,
   onResumePosition,
+  qualityPreference = { mode: 'auto' },
 }: {
   tile: Tile;
   command?: PlayerCommand;
@@ -95,6 +99,7 @@ export const PlayerTile = memo(function PlayerTile({
     playlistIndex?: number,
   ) => void;
   onResumePosition?: (tileId: string, sourceUrl: string, position: number) => void;
+  qualityPreference?: QualityPreference;
 }) {
   const mount = useRef<HTMLDivElement>(null);
   const adapter = useRef<Adapter | undefined>(undefined);
@@ -122,11 +127,16 @@ export const PlayerTile = memo(function PlayerTile({
   const audioCheckTimer = useRef<number | undefined>(undefined);
   const latestName = useRef(tile.name);
   const liveSource = useRef(false);
+  const hlsRef = useRef<Hls | undefined>(undefined);
+  const hlsLevelsRef = useRef<HlsQualityLevel[]>([]);
+  const qualityPreferenceRef = useRef(qualityPreference);
+  const qualityHealthRef = useRef<Partial<PlayerHealth>>({});
   const playbackRef = useRef(tile.playback);
   const progressRef = useRef(progress);
   latestName.current = tile.name;
   playbackRef.current = tile.playback;
   progressRef.current = progress;
+  qualityPreferenceRef.current = qualityPreference;
 
   const publish = useCallback(
     (
@@ -152,6 +162,7 @@ export const PlayerTile = memo(function PlayerTile({
         technicalDetail: detail,
         retryAttempt: retry,
         nextRetryAt,
+        ...qualityHealthRef.current,
         ...detailState,
       });
     },
@@ -723,8 +734,34 @@ export const PlayerTile = memo(function PlayerTile({
       if (video.canPlayType('application/vnd.apple.mpegurl')) video.src = tile.source.url;
       else if (Hls.isSupported()) {
         hls = new Hls({ enableWorker: true, lowLatencyMode: true });
+        hlsRef.current = hls;
         hls.loadSource(tile.source.url);
         hls.attachMedia(video);
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          if (!hls) return;
+          const levels = hls.levels.map((level, index) => ({
+            index,
+            height: level.height || undefined,
+            bitrate: level.bitrate || undefined,
+          }));
+          hlsLevelsRef.current = levels;
+          const selected = resolveHlsQualityLevel(levels, qualityPreferenceRef.current);
+          hls.nextLevel = selected.index;
+          qualityHealthRef.current = {
+            qualityLevels: levels,
+            qualityCurrentLevel: hls.currentLevel,
+            qualityAuto: selected.index === -1,
+            qualityFallback: selected.fallback,
+          };
+          publish(statusRef.current, undefined, undefined, undefined, undefined);
+        });
+        hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
+          qualityHealthRef.current = {
+            ...qualityHealthRef.current,
+            qualityCurrentLevel: data.level,
+          };
+          publish(statusRef.current, undefined, undefined, undefined, undefined);
+        });
         hls.on(Hls.Events.ERROR, (_event, data) => {
           if (data.fatal)
             scheduleRetry('This HLS stream could not be loaded.', `${data.type}:${data.details}`);
@@ -759,6 +796,9 @@ export const PlayerTile = memo(function PlayerTile({
         isMuted: () => video.muted,
         destroy: () => {
           hls?.destroy();
+          hlsRef.current = undefined;
+          hlsLevelsRef.current = [];
+          qualityHealthRef.current = {};
           video.removeAttribute('src');
           video.load();
         },
@@ -809,6 +849,20 @@ export const PlayerTile = memo(function PlayerTile({
     tile.playlistIndex,
     tile.resumePosition,
   ]);
+
+  useEffect(() => {
+    const hls = hlsRef.current;
+    if (!hls) return;
+    const selected = resolveHlsQualityLevel(hlsLevelsRef.current, qualityPreference);
+    // nextLevel switches on the next fragment and avoids destroying or seeking the player.
+    hls.nextLevel = selected.index;
+    qualityHealthRef.current = {
+      ...qualityHealthRef.current,
+      qualityAuto: selected.index === -1,
+      qualityFallback: selected.fallback,
+    };
+    publish(statusRef.current, undefined, undefined, undefined, undefined);
+  }, [publish, qualityPreference]);
 
   useEffect(() => {
     if (stopped || tile.source.type === 'website') return;

@@ -782,7 +782,6 @@ test('P3 layout previews, custom templates, and named walls preserve live player
     .locator('.mock-player')
     .evaluateAll((players) => players.map((player) => player.getAttribute('data-instance-id')));
 
-  await admin.getByRole('tab', { name: 'Layouts' }).click();
   const customTrigger = admin.getByRole('button', { name: 'New Custom Layout' });
   await customTrigger.click();
   const builderBounds = await admin
@@ -814,7 +813,6 @@ test('P3 layout previews, custom templates, and named walls preserve live player
     tiles.map((tile) => tile.id),
   );
 
-  await admin.getByRole('tab', { name: 'Named Walls' }).click();
   admin.once('dialog', (dialog) => dialog.accept('Morning desk'));
   await admin.getByRole('button', { name: 'Save Current Wall' }).click();
   const presetCard = admin.locator('.preset-card').filter({ hasText: 'Morning desk' });
@@ -862,6 +860,109 @@ test('P3 layout previews, custom templates, and named walls preserve live player
         .evaluateAll((players) => players.map((player) => player.getAttribute('data-instance-id'))),
     )
     .toEqual(instances);
+  await context.close();
+});
+
+test('four-tile Auto preview and Wall share a stable non-overlapping 2x2 grid', async ({
+  browser,
+  request,
+}, testInfo) => {
+  const tiles = ['one', 'two', 'three', 'four'].map((label, displayOrder) => ({
+    id: `auto-${label}`,
+    name: label.toUpperCase(),
+    titleMode: 'manual',
+    source: { type: 'mock', url: `https://mock.livewall.local/?label=${label}` },
+    playback: { behavior: 'resume' },
+    x: 0,
+    y: 0,
+    w: displayOrder === 3 ? 4 : 6,
+    h: displayOrder === 3 ? 4 : 6,
+    muted: true,
+    volume: 40,
+    displayOrder,
+  }));
+  const state = { version: 0, updatedAt: Date.now(), layoutMode: 'automatic', tiles };
+  await request.put('/api/state', { data: state });
+  await request.put('/api/wall-presets', {
+    data: {
+      presets: [{ id: 'default-auto', name: 'Default', state, createdAt: 1, updatedAt: 1 }],
+    },
+  });
+  const context = await browser.newContext({ viewport: { width: 1200, height: 800 } });
+  const admin = await context.newPage();
+  const wall = await context.newPage();
+  await Promise.all([admin.goto('/admin'), wall.goto('/wall')]);
+
+  const preview = admin
+    .locator('.preset-card')
+    .filter({ hasText: 'Default' })
+    .locator('.layout-preview');
+  const previewBoxes = await preview.locator('span').evaluateAll((nodes) =>
+    nodes.map((node) => {
+      const rect = node.getBoundingClientRect();
+      return {
+        label: node.textContent,
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+      };
+    }),
+  );
+  const wallBoxes = await wall.locator('.wall-tile-host').evaluateAll((nodes) =>
+    nodes.map((node) => {
+      const rect = node.getBoundingClientRect();
+      return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+    }),
+  );
+  const assertTwoByTwo = (
+    boxes: Array<{ x: number; y: number; width: number; height: number }>,
+  ) => {
+    expect(boxes).toHaveLength(4);
+    expect(boxes[0].x).toBeLessThan(boxes[1].x);
+    expect(boxes[0].y).toBe(boxes[1].y);
+    expect(boxes[2].x).toBeLessThan(boxes[3].x);
+    expect(boxes[2].y).toBeGreaterThan(boxes[0].y);
+    for (const box of boxes) {
+      expect(box.width).toBeCloseTo(boxes[0].width, 0);
+      expect(box.height).toBeCloseTo(boxes[0].height, 0);
+    }
+    for (const [index, box] of boxes.entries())
+      for (const other of boxes.slice(index + 1))
+        expect(
+          box.x < other.x + other.width &&
+            box.x + box.width > other.x &&
+            box.y < other.y + other.height &&
+            box.y + box.height > other.y,
+        ).toBe(false);
+  };
+  expect(previewBoxes.map((box) => box.label)).toEqual(['1', '2', '3', '4']);
+  assertTwoByTwo(previewBoxes);
+  assertTwoByTwo(wallBoxes);
+  await preview.screenshot({ path: testInfo.outputPath('auto-four-preview.png') });
+  await wall.screenshot({ path: testInfo.outputPath('auto-four-wall.png') });
+
+  const instances = await wall
+    .locator('.mock-player')
+    .evaluateAll((players) => players.map((player) => player.getAttribute('data-instance-id')));
+  await admin.getByRole('button', { name: /Freeform/ }).click();
+  await admin.getByRole('button', { name: /Auto/ }).click();
+  await expect
+    .poll(() =>
+      wall
+        .locator('.mock-player')
+        .evaluateAll((players) => players.map((player) => player.getAttribute('data-instance-id'))),
+    )
+    .toEqual(instances);
+
+  const namedHeader = admin.getByRole('button', { name: /Named Walls 1 preset/ });
+  await namedHeader.click();
+  await expect(namedHeader).toHaveAttribute('aria-expanded', 'false');
+  await admin.reload();
+  await expect(admin.getByRole('button', { name: /Named Walls 1 preset/ })).toHaveAttribute(
+    'aria-expanded',
+    'false',
+  );
   await context.close();
 });
 

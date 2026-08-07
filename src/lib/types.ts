@@ -120,7 +120,20 @@ export interface PlayerHealth {
   warning?: string;
   audioActivationRequired?: boolean;
   muted?: boolean;
+  qualityLevels?: HlsQualityLevel[];
+  qualityCurrentLevel?: number;
+  qualityAuto?: boolean;
+  qualityFallback?: boolean;
 }
+
+export interface HlsQualityLevel {
+  index: number;
+  height?: number;
+  bitrate?: number;
+}
+
+export type QualityPreference =
+  { mode: 'auto' } | { mode: 'level'; height?: number; bitrate?: number };
 
 export interface LayoutSlot {
   id: string;
@@ -183,6 +196,7 @@ export interface WallState {
   layoutMode: 'automatic' | 'freeform' | 'template';
   activeLayoutId?: string;
   layoutSlots?: LayoutSlot[];
+  freeformLayout?: LayoutSlot[];
   tiles: Tile[];
   activeAudioTileId?: string;
   globallyStopped: boolean;
@@ -190,6 +204,7 @@ export interface WallState {
   overlayMode: OverlayMode;
   appearance: WallAppearance;
   library: SourceLibrary;
+  qualityPreferences?: Record<string, QualityPreference>;
 }
 
 export type PlayerCommandName =

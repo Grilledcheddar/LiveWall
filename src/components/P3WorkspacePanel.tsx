@@ -1,7 +1,9 @@
 import { useEffect, useId, useMemo, useState } from 'react';
 import { Copy, Pencil, Search, Trash2, X } from 'lucide-react';
 import { Button } from './Button';
+import { CollapsibleHeader } from './CollapsibleHeader';
 import {
+  activeLayoutSlots,
   applyLayoutTemplate,
   BUILT_IN_LAYOUTS,
   layoutOnlyState,
@@ -35,6 +37,8 @@ interface Props {
   saveTemplates: (file: LayoutTemplateFile) => Promise<unknown>;
   savePresets: (file: WallPresetFile) => Promise<unknown>;
   onFeedback: (message: string) => void;
+  collapsed?: { walls: boolean; layouts: boolean };
+  onToggleCollapsed?: (section: 'walls' | 'layouts') => void;
 }
 
 function LayoutPreview({
@@ -329,8 +333,9 @@ export function P3WorkspacePanel({
   saveTemplates = () => Promise.resolve(),
   savePresets = () => Promise.resolve(),
   onFeedback,
+  collapsed = { walls: false, layouts: false },
+  onToggleCollapsed = () => undefined,
 }: Props) {
-  const [tab, setTab] = useState<'walls' | 'layouts'>('walls');
   const [layoutPreview, setLayoutPreview] = useState<LayoutTemplate>();
   const [builder, setBuilder] = useState<LayoutTemplate | null>();
   const [builderOpen, setBuilderOpen] = useState(false);
@@ -385,273 +390,267 @@ export function P3WorkspacePanel({
 
   return (
     <section className="p3-workspace" aria-label="Walls and Layouts">
-      <div className="workspace-tabs" role="tablist">
-        <Button
-          variant="ghost"
-          role="tab"
-          aria-selected={tab === 'walls'}
-          onClick={() => setTab('walls')}
-        >
-          Named Walls
-        </Button>
-        <Button
-          variant="ghost"
-          role="tab"
-          aria-selected={tab === 'layouts'}
-          onClick={() => setTab('layouts')}
-        >
-          Layouts
-        </Button>
-      </div>
-      {tab === 'walls' ? (
-        <div className="workspace-panel">
-          <div className="panel-heading">
-            <div>
-              <span className="eyebrow">LIVE WORKSPACE</span>
-              <h2>Named Walls</h2>
-              <p>Presets change only when you explicitly update them.</p>
-            </div>
-            <Button
-              variant="primary"
-              onClick={(event) => {
-                setReturnFocus(event.currentTarget);
-                void saveCurrent();
-              }}
-            >
-              Save Current Wall
-            </Button>
-          </div>
-          {loadedPreset && (
-            <div className={`workspace-state ${modified?.modified ? 'modified' : ''}`}>
-              <strong>Loaded: {loadedPreset.name}</strong>
-              <span>
-                {modified?.modified
-                  ? `Modified — ${modified.details.join('; ')}`
-                  : 'Matches saved preset'}
-              </span>
+      <section className="collapsible-section named-walls-section">
+        <CollapsibleHeader
+          title="Named Walls"
+          summary={`${presets.presets.length} preset${presets.presets.length === 1 ? '' : 's'}`}
+          expanded={!collapsed.walls}
+          onToggle={() => onToggleCollapsed('walls')}
+        />
+        {!collapsed.walls && (
+          <div className="workspace-panel">
+            <div className="panel-heading">
               <div>
-                <Button
-                  variant="primary"
-                  disabled={!modified?.modified}
-                  onClick={() =>
-                    void savePresets(updateWallPreset(presets, loadedPreset.id, state)).then(() =>
-                      onFeedback(`Updated '${loadedPreset.name}'.`),
-                    )
-                  }
-                >
-                  Update Preset
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => void saveCurrent(`${loadedPreset.name} copy`)}
-                >
-                  Save As
-                </Button>
+                <span className="eyebrow">LIVE WORKSPACE</span>
+                <h2>Named Walls</h2>
+                <p>Presets change only when you explicitly update them.</p>
               </div>
+              <Button
+                variant="primary"
+                onClick={(event) => {
+                  setReturnFocus(event.currentTarget);
+                  void saveCurrent();
+                }}
+              >
+                Save Current Wall
+              </Button>
             </div>
-          )}
-          <div className="preset-filters">
-            <label>
-              <Search size={15} />
-              <input
-                aria-label="Search walls"
-                placeholder="Search walls"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-              />
-            </label>
-            <label>
-              Sort
-              <select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)}>
-                <option value="updated">Last updated</option>
-                <option value="name">Name</option>
-                <option value="tiles">Tile count</option>
-              </select>
-            </label>
-          </div>
-          {!shownPresets.length ? (
-            <p className="empty-state">
-              No named walls yet. Save the current workspace to create one.
-            </p>
-          ) : (
-            <div className="preset-cards">
-              {shownPresets.map((preset) => (
-                <article key={preset.id} className="preset-card">
-                  <LayoutPreview
-                    template={{
-                      columns: 12,
-                      rows: 12,
-                      slots:
-                        preset.state.layoutSlots ??
-                        preset.state.tiles.map((tile, index) => ({
-                          id: tile.id,
-                          column: tile.x + 1 || (index % 3) * 4 + 1,
-                          row: tile.y + 1 || Math.floor(index / 3) * 4 + 1,
-                          columnSpan: tile.w || 4,
-                          rowSpan: tile.h || 4,
-                        })),
-                    }}
-                  />
-                  <div>
-                    <strong>{preset.name}</strong>
-                    <small>
-                      {preset.state.tiles.length} tile{preset.state.tiles.length === 1 ? '' : 's'} ·{' '}
-                      {new Date(preset.updatedAt).toLocaleString()}
-                    </small>
-                  </div>
-                  <div className="card-actions">
-                    <Button
-                      variant="secondary"
-                      onClick={(event) => {
-                        if (!warnModified()) return;
-                        setReturnFocus(event.currentTarget);
-                        setPresetPreviewId(preset.id);
-                      }}
-                    >
-                      Preview
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      aria-label={`Rename ${preset.name}`}
-                      onClick={() => {
-                        const name = prompt('Rename wall', preset.name);
-                        if (name) void savePresets(renameWallPreset(presets, preset.id, name));
-                      }}
-                    >
-                      <Pencil />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      aria-label={`Duplicate ${preset.name}`}
-                      onClick={() => {
-                        const name = prompt('Duplicate wall as', `${preset.name} copy`);
-                        if (name) void savePresets(duplicateWallPreset(presets, preset.id, name));
-                      }}
-                    >
-                      <Copy />
-                    </Button>
-                    <Button
-                      variant="destructive"
-                      aria-label={`Delete ${preset.name}`}
-                      onClick={() =>
-                        confirm(`Delete '${preset.name}'?`) &&
-                        void savePresets(deleteWallPreset(presets, preset.id))
-                      }
-                    >
-                      <Trash2 />
-                    </Button>
-                  </div>
-                </article>
-              ))}
+            {loadedPreset && (
+              <div className={`workspace-state ${modified?.modified ? 'modified' : ''}`}>
+                <strong>Loaded: {loadedPreset.name}</strong>
+                <span>
+                  {modified?.modified
+                    ? `Modified — ${modified.details.join('; ')}`
+                    : 'Matches saved preset'}
+                </span>
+                <div>
+                  <Button
+                    variant="primary"
+                    disabled={!modified?.modified}
+                    onClick={() =>
+                      void savePresets(updateWallPreset(presets, loadedPreset.id, state)).then(() =>
+                        onFeedback(`Updated '${loadedPreset.name}'.`),
+                      )
+                    }
+                  >
+                    Update Preset
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() => void saveCurrent(`${loadedPreset.name} copy`)}
+                  >
+                    Save As
+                  </Button>
+                </div>
+              </div>
+            )}
+            <div className="preset-filters">
+              <label>
+                <Search size={15} />
+                <input
+                  aria-label="Search walls"
+                  placeholder="Search walls"
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                />
+              </label>
+              <label>
+                Sort
+                <select
+                  value={sort}
+                  onChange={(event) => setSort(event.target.value as typeof sort)}
+                >
+                  <option value="updated">Last updated</option>
+                  <option value="name">Name</option>
+                  <option value="tiles">Tile count</option>
+                </select>
+              </label>
             </div>
-          )}
-        </div>
-      ) : (
-        <div className="workspace-panel">
-          <div className="panel-heading">
-            <div>
-              <span className="eyebrow">VISUAL ARRANGEMENTS</span>
-              <h2>Layout Templates</h2>
-              <p>
-                Templates move existing tile containers in display order without changing sources or
-                players.
+            {!shownPresets.length ? (
+              <p className="empty-state">
+                No named walls yet. Save the current workspace to create one.
               </p>
-            </div>
-            <Button
-              variant="primary"
-              onClick={(event) => {
-                setReturnFocus(event.currentTarget);
-                setBuilder(null);
-                setBuilderOpen(true);
-              }}
-            >
-              New Custom Layout
-            </Button>
-          </div>
-          <div className="layout-cards">
-            {allLayouts.map((template) => {
-              const overflow = state.tiles.length - template.slots.length;
-              return (
-                <article key={template.id} className="layout-card">
-                  <LayoutPreview template={template} />
-                  <div>
-                    <strong>{template.name}</strong>
-                    <small>
-                      {template.slots.length} slot{template.slots.length === 1 ? '' : 's'} ·{' '}
-                      {template.builtIn ? 'Built in' : 'Custom'}
-                    </small>
-                    {overflow > 0 && (
-                      <span className="validation-error">
-                        {overflow} current tile{overflow === 1 ? '' : 's'} would not fit. Choose a
-                        layout with at least {state.tiles.length} slots.
-                      </span>
-                    )}
-                  </div>
-                  <div className="card-actions">
-                    <Button
-                      variant="secondary"
-                      onClick={(event) => {
-                        setReturnFocus(event.currentTarget);
-                        setLayoutPreview(template);
+            ) : (
+              <div className="preset-cards">
+                {shownPresets.map((preset) => (
+                  <article key={preset.id} className="preset-card">
+                    <LayoutPreview
+                      template={{
+                        columns: 12,
+                        rows: 12,
+                        slots: activeLayoutSlots(preset.state),
                       }}
-                    >
-                      Preview
-                    </Button>
-                    {!template.builtIn && (
-                      <>
-                        <Button
-                          variant="ghost"
-                          aria-label={`Edit ${template.name}`}
-                          onClick={(event) => {
-                            setReturnFocus(event.currentTarget);
-                            setBuilder(template);
-                            setBuilderOpen(true);
-                          }}
-                        >
-                          <Pencil />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          aria-label={`Duplicate ${template.name}`}
-                          onClick={() => {
-                            const copy = {
-                              ...template,
-                              id: crypto.randomUUID(),
-                              name: `${template.name} copy`,
-                              createdAt: Date.now(),
-                              updatedAt: Date.now(),
-                            };
-                            void persistTemplate(copy);
-                          }}
-                        >
-                          <Copy />
-                        </Button>
-                        <Button
-                          variant="destructive"
-                          aria-label={`Delete ${template.name}`}
-                          onClick={() =>
-                            confirm(`Delete '${template.name}'?`) &&
-                            void saveTemplates(
-                              normalizeLayoutTemplates({
-                                ...templates,
-                                templates: templates.templates.filter(
-                                  (item) => item.id !== template.id,
-                                ),
-                              }),
-                            )
-                          }
-                        >
-                          <Trash2 />
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                </article>
-              );
-            })}
+                    />
+                    <div>
+                      <strong>{preset.name}</strong>
+                      <small>
+                        {preset.state.tiles.length} tile{preset.state.tiles.length === 1 ? '' : 's'}{' '}
+                        · {new Date(preset.updatedAt).toLocaleString()}
+                      </small>
+                    </div>
+                    <div className="card-actions">
+                      <Button
+                        variant="secondary"
+                        onClick={(event) => {
+                          if (!warnModified()) return;
+                          setReturnFocus(event.currentTarget);
+                          setPresetPreviewId(preset.id);
+                        }}
+                      >
+                        Preview
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        aria-label={`Rename ${preset.name}`}
+                        onClick={() => {
+                          const name = prompt('Rename wall', preset.name);
+                          if (name) void savePresets(renameWallPreset(presets, preset.id, name));
+                        }}
+                      >
+                        <Pencil />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        aria-label={`Duplicate ${preset.name}`}
+                        onClick={() => {
+                          const name = prompt('Duplicate wall as', `${preset.name} copy`);
+                          if (name) void savePresets(duplicateWallPreset(presets, preset.id, name));
+                        }}
+                      >
+                        <Copy />
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        aria-label={`Delete ${preset.name}`}
+                        onClick={() =>
+                          confirm(`Delete '${preset.name}'?`) &&
+                          void savePresets(deleteWallPreset(presets, preset.id))
+                        }
+                      >
+                        <Trash2 />
+                      </Button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        )}
+      </section>
+      <section className="collapsible-section layouts-section">
+        <CollapsibleHeader
+          title="Wall Layouts"
+          summary={`${state.layoutMode === 'automatic' ? 'Auto' : state.layoutMode === 'template' ? 'Custom' : 'Freeform'}, ${state.tiles.length} tile${state.tiles.length === 1 ? '' : 's'}`}
+          expanded={!collapsed.layouts}
+          onToggle={() => onToggleCollapsed('layouts')}
+        />
+        {!collapsed.layouts && (
+          <div className="workspace-panel">
+            <div className="panel-heading">
+              <div>
+                <span className="eyebrow">VISUAL ARRANGEMENTS</span>
+                <h2>Layout Templates</h2>
+                <p>
+                  Templates move existing tile containers in display order without changing sources
+                  or players.
+                </p>
+              </div>
+              <Button
+                variant="primary"
+                onClick={(event) => {
+                  setReturnFocus(event.currentTarget);
+                  setBuilder(null);
+                  setBuilderOpen(true);
+                }}
+              >
+                New Custom Layout
+              </Button>
+            </div>
+            <div className="layout-cards">
+              {allLayouts.map((template) => {
+                const overflow = state.tiles.length - template.slots.length;
+                return (
+                  <article key={template.id} className="layout-card">
+                    <LayoutPreview template={template} />
+                    <div>
+                      <strong>{template.name}</strong>
+                      <small>
+                        {template.slots.length} slot{template.slots.length === 1 ? '' : 's'} ·{' '}
+                        {template.builtIn ? 'Built in' : 'Custom'}
+                      </small>
+                      {overflow > 0 && (
+                        <span className="validation-error">
+                          {overflow} current tile{overflow === 1 ? '' : 's'} would not fit. Choose a
+                          layout with at least {state.tiles.length} slots.
+                        </span>
+                      )}
+                    </div>
+                    <div className="card-actions">
+                      <Button
+                        variant="secondary"
+                        onClick={(event) => {
+                          setReturnFocus(event.currentTarget);
+                          setLayoutPreview(template);
+                        }}
+                      >
+                        Preview
+                      </Button>
+                      {!template.builtIn && (
+                        <>
+                          <Button
+                            variant="ghost"
+                            aria-label={`Edit ${template.name}`}
+                            onClick={(event) => {
+                              setReturnFocus(event.currentTarget);
+                              setBuilder(template);
+                              setBuilderOpen(true);
+                            }}
+                          >
+                            <Pencil />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            aria-label={`Duplicate ${template.name}`}
+                            onClick={() => {
+                              const copy = {
+                                ...template,
+                                id: crypto.randomUUID(),
+                                name: `${template.name} copy`,
+                                createdAt: Date.now(),
+                                updatedAt: Date.now(),
+                              };
+                              void persistTemplate(copy);
+                            }}
+                          >
+                            <Copy />
+                          </Button>
+                          <Button
+                            variant="destructive"
+                            aria-label={`Delete ${template.name}`}
+                            onClick={() =>
+                              confirm(`Delete '${template.name}'?`) &&
+                              void saveTemplates(
+                                normalizeLayoutTemplates({
+                                  ...templates,
+                                  templates: templates.templates.filter(
+                                    (item) => item.id !== template.id,
+                                  ),
+                                }),
+                              )
+                            }
+                          >
+                            <Trash2 />
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </section>
       {layoutPreview && (
         <Modal
           title={`Preview: ${layoutPreview.name}`}
@@ -709,15 +708,7 @@ export function P3WorkspacePanel({
               template={{
                 columns: 12,
                 rows: 12,
-                slots:
-                  selectedPreset.state.layoutSlots ??
-                  selectedPreset.state.tiles.map((tile) => ({
-                    id: tile.id,
-                    column: tile.x + 1,
-                    row: tile.y + 1,
-                    columnSpan: tile.w,
-                    rowSpan: tile.h,
-                  })),
+                slots: activeLayoutSlots(selectedPreset.state),
               }}
             />
             <p>

@@ -74,6 +74,88 @@ export const BUILT_IN_LAYOUTS: readonly LayoutTemplate[] = Object.freeze([
   ),
 ]);
 
+export function automaticLayoutSlots(count: number): LayoutSlot[] {
+  const safeCount = Math.min(9, Math.max(0, Math.floor(count)));
+  if (!safeCount) return [];
+  if (safeCount === 1) return [slot('auto-1', 1, 1, 12, 12)];
+  if (safeCount === 2) return [slot('auto-1', 1, 1, 6, 12), slot('auto-2', 7, 1, 6, 12)];
+  if (safeCount === 3)
+    return [slot('auto-1', 1, 1, 12, 6), slot('auto-2', 1, 7, 6, 6), slot('auto-3', 7, 7, 6, 6)];
+  const columns = safeCount <= 4 ? 2 : 3;
+  const rows = safeCount <= 6 ? 2 : 3;
+  const width = 12 / columns;
+  const height = 12 / rows;
+  return Array.from({ length: safeCount }, (_, index) =>
+    slot(
+      `auto-${index + 1}`,
+      (index % columns) * width + 1,
+      Math.floor(index / columns) * height + 1,
+      width,
+      height,
+    ),
+  );
+}
+
+function freeformSlots(state: WallState): LayoutSlot[] {
+  return orderedTiles(state.tiles).map((tile) => ({
+    id: tile.id,
+    column: Number.isFinite(tile.x) ? tile.x + 1 : 1,
+    row: Number.isFinite(tile.y) ? tile.y + 1 : 1,
+    columnSpan: Number.isFinite(tile.w) && tile.w > 0 ? tile.w : 1,
+    rowSpan: Number.isFinite(tile.h) && tile.h > 0 ? tile.h : 1,
+  }));
+}
+
+export function activeLayoutSlots(state: WallState): LayoutSlot[] {
+  const tiles = orderedTiles(state.tiles);
+  if (state.layoutMode === 'automatic') return automaticLayoutSlots(tiles.length);
+  if (state.layoutMode === 'template' && (state.layoutSlots?.length ?? 0) >= tiles.length)
+    return state.layoutSlots!.slice(0, tiles.length);
+  return freeformSlots(state);
+}
+
+export function wallLayoutForState(state: WallState) {
+  const tiles = orderedTiles(state.tiles);
+  const slots = activeLayoutSlots(state);
+  return tiles.map((tile, index) => {
+    const assigned = slots[index];
+    return {
+      i: tile.id,
+      x: assigned.column - 1,
+      y: assigned.row - 1,
+      w: assigned.columnSpan,
+      h: assigned.rowSpan,
+    };
+  });
+}
+
+export function activateAutomaticLayout(state: WallState): WallState {
+  return {
+    ...state,
+    layoutMode: 'automatic',
+    freeformLayout: state.layoutMode === 'freeform' ? freeformSlots(state) : state.freeformLayout,
+  };
+}
+
+export function activateFreeformLayout(state: WallState): WallState {
+  const positions = new Map(
+    (state.freeformLayout ?? []).map((saved) => [
+      saved.id,
+      {
+        x: saved.column - 1,
+        y: saved.row - 1,
+        w: saved.columnSpan,
+        h: saved.rowSpan,
+      },
+    ]),
+  );
+  return {
+    ...state,
+    layoutMode: 'freeform',
+    tiles: state.tiles.map((tile) => ({ ...tile, ...positions.get(tile.id) })),
+  };
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 const integer = (value: unknown, fallback: number) =>
@@ -106,6 +188,34 @@ export function normalizeLayoutSlots(value: unknown, columns = 12, rows = 12): L
     if (result.length === 9) break;
   }
   return result;
+}
+
+export function normalizeFreeformLayout(value: unknown, columns = 12, rows = 12): LayoutSlot[] {
+  if (!Array.isArray(value)) return [];
+  const ids = new Set<string>();
+  return value.flatMap((candidate, index): LayoutSlot[] => {
+    if (!isRecord(candidate)) return [];
+    const next: LayoutSlot = {
+      id:
+        typeof candidate.id === 'string' && candidate.id.trim() ? candidate.id : String(index + 1),
+      column: integer(candidate.column, 1),
+      row: integer(candidate.row, 1),
+      columnSpan: integer(candidate.columnSpan, 1),
+      rowSpan: integer(candidate.rowSpan, 1),
+    };
+    if (
+      ids.has(next.id) ||
+      next.column < 1 ||
+      next.row < 1 ||
+      next.columnSpan < 1 ||
+      next.rowSpan < 1 ||
+      next.column + next.columnSpan - 1 > columns ||
+      next.row + next.rowSpan - 1 > rows
+    )
+      return [];
+    ids.add(next.id);
+    return [next];
+  });
 }
 
 export function slotsOverlap(first: LayoutSlot, second: LayoutSlot) {
@@ -183,6 +293,11 @@ export function applyLayoutTemplate(state: WallState, template: LayoutTemplate):
   );
   return {
     ...state,
+    freeformLayout:
+      state.layoutMode === 'freeform' ||
+      (state.layoutMode === 'automatic' && !state.freeformLayout?.length)
+        ? freeformSlots(state)
+        : state.freeformLayout,
     layoutMode: 'template',
     activeLayoutId: template.id,
     layoutSlots: template.slots,
@@ -196,21 +311,34 @@ export function applyLayoutTemplate(state: WallState, template: LayoutTemplate):
 export function layoutOnlyState(current: WallState, preset: WallState): WallState {
   const sourceFields = new Map(current.tiles.map((tile) => [tile.id, tile]));
   const orderedCurrent = orderedTiles(current.tiles);
-  const orderedPreset = orderedTiles(preset.tiles);
+  const presetSlots = activeLayoutSlots(preset);
   const positions = new Map(
     orderedCurrent.map((tile, index) => {
-      const position = orderedPreset[index];
+      const position = presetSlots[index];
       return [
         tile.id,
-        position ? { x: position.x, y: position.y, w: position.w, h: position.h } : {},
+        position && preset.layoutMode !== 'automatic'
+          ? {
+              x: position.column - 1,
+              y: position.row - 1,
+              w: position.columnSpan,
+              h: position.rowSpan,
+            }
+          : {},
       ];
     }),
   );
+  const appliedFreeform =
+    preset.layoutMode === 'freeform'
+      ? orderedCurrent.map((tile, index) => ({ ...presetSlots[index], id: tile.id }))
+      : current.freeformLayout;
   return {
     ...current,
     layoutMode: preset.layoutMode,
-    activeLayoutId: preset.activeLayoutId,
-    layoutSlots: preset.layoutSlots,
+    activeLayoutId:
+      preset.layoutMode === 'template' ? preset.activeLayoutId : current.activeLayoutId,
+    layoutSlots: preset.layoutMode === 'template' ? preset.layoutSlots : current.layoutSlots,
+    freeformLayout: appliedFreeform,
     tiles: current.tiles.map((tile) => ({
       ...sourceFields.get(tile.id)!,
       ...positions.get(tile.id)!,

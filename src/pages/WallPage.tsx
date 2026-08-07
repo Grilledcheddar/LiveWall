@@ -5,13 +5,10 @@ import GridLayout from 'react-grid-layout';
 import { Button } from '../components/Button';
 import { PlayerTile } from '../components/PlayerTile';
 import { useWall } from '../hooks/useWall';
-import {
-  automaticGrid,
-  normalizeAppearance,
-  normalizeOverlayMode,
-  orderedTiles,
-} from '../lib/state';
+import { wallLayoutForState } from '../lib/layouts';
+import { normalizeAppearance, normalizeOverlayMode, orderedTiles } from '../lib/state';
 import { playbackKey } from '../lib/playback';
+import { canonicalSourceUrl } from '../lib/sources';
 
 export function WallPage() {
   const {
@@ -29,20 +26,7 @@ export function WallPage() {
   const tiles = useMemo(() => orderedTiles(state.tiles), [state.tiles]);
   const appearance = normalizeAppearance(state.appearance);
   const overlayMode = normalizeOverlayMode(state.overlayMode);
-  const grid = automaticGrid(tiles.length);
-  const wallLayout = tiles.map((tile, index) => {
-    if (state.layoutMode !== 'automatic')
-      return { i: tile.id, x: tile.x, y: tile.y, w: tile.w, h: tile.h };
-    const width = 12 / grid.columns;
-    const height = 12 / grid.rows;
-    return {
-      i: tile.id,
-      x: (index % grid.columns) * width,
-      y: Math.floor(index / grid.columns) * height,
-      w: width,
-      h: height,
-    };
-  });
+  const wallLayout = wallLayoutForState(state);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [fullscreen, setFullscreen] = useState(Boolean(document.fullscreenElement));
   const [fullscreenError, setFullscreenError] = useState('');
@@ -182,6 +166,7 @@ export function WallPage() {
                   overlayMode={overlayMode}
                   focused={state.focusedTileId === tile.id}
                   activeAudio={state.activeAudioTileId === tile.id}
+                  qualityPreference={state.qualityPreferences?.[canonicalSourceUrl(tile.source)]}
                   onHealth={reportHealth}
                   progress={progress?.entries?.find(
                     (entry) => entry.key === playbackKey(tile.source),

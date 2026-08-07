@@ -1,5 +1,6 @@
 import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { newTile } from '../lib/state';
 import type { PlaybackProgress, PlayerCommand, PlayerHealth } from '../lib/types';
 import { PlayerTile } from './PlayerTile';
@@ -16,6 +17,17 @@ afterEach(() => {
 });
 
 describe('PlayerTile lifecycle', () => {
+  it('contains none of the unsupported YouTube quality APIs', () => {
+    const sourceCode = readFileSync('src/components/PlayerTile.tsx', 'utf8');
+    for (const unsupported of [
+      'getPlaybackQuality',
+      'setPlaybackQuality',
+      'getAvailableQualityLevels',
+      'suggestedQuality',
+    ])
+      expect(sourceCode).not.toContain(unsupported);
+  });
+
   it('does not remount the target or unrelated player for metadata and volume changes', () => {
     const first = newTile('First', source('first'));
     const second = newTile('Second', source('second'));

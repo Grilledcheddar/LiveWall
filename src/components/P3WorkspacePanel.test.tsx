@@ -42,7 +42,6 @@ afterEach(() => {
 describe('P3 workspace', () => {
   it('requires a layout preview and blocks layouts with too few slots', () => {
     const { props } = renderPanel();
-    fireEvent.click(screen.getByRole('tab', { name: 'Layouts' }));
     const card = screen.getByText('Single tile').closest('article')!;
     fireEvent.click(card.querySelector('button')!);
     expect(screen.getByRole('dialog', { name: /Preview: Single tile/i })).toBeInTheDocument();
@@ -52,7 +51,6 @@ describe('P3 workspace', () => {
 
   it('applies layout using stable tile IDs and restores focus after Escape', async () => {
     const { props } = renderPanel();
-    fireEvent.click(screen.getByRole('tab', { name: 'Layouts' }));
     const card = screen.getByText('Two side-by-side').closest('article')!;
     const trigger = card.querySelector('button')!;
     fireEvent.click(trigger);
@@ -69,7 +67,6 @@ describe('P3 workspace', () => {
   it('provides custom builder Cancel, Escape, dirty warning, Undo, Reset, Preview, and Save', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(false);
     renderPanel();
-    fireEvent.click(screen.getByRole('tab', { name: 'Layouts' }));
     fireEvent.click(screen.getByRole('button', { name: 'New Custom Layout' }));
     expect(screen.getByRole('button', { name: 'Undo' })).toBeDisabled();
     fireEvent.change(screen.getByLabelText('Unique template name'), {
@@ -91,7 +88,8 @@ describe('P3 workspace', () => {
     };
     const presets = createWallPreset(normalizeWallPresets(undefined), 'Morning wall', state, 10);
     const { props } = renderPanel({ presets });
-    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    const namedWalls = document.querySelector('.named-walls-section')!;
+    fireEvent.click(within(namedWalls as HTMLElement).getByRole('button', { name: 'Preview' }));
     expect(props.saveState).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'Apply Layout Only' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Replace Current Wall' })).toBeEnabled();
