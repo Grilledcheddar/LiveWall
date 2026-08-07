@@ -32,7 +32,7 @@ import { type DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from 
 import GridLayout, { type Layout } from 'react-grid-layout';
 import { SourceLibraryPanel } from '../components/SourceLibraryPanel';
 import { useWall } from '../hooks/useWall';
-import { normalizeSourceLibrary, setLibraryFavorite } from '../lib/library';
+import { normalizeSourceLibrary, saveLibrarySource, setLibraryFavorite } from '../lib/library';
 import { canonicalSourceUrl, detectSource } from '../lib/sources';
 import {
   defaultAppearance,
@@ -64,32 +64,55 @@ function Countdown({ timestamp }: { timestamp: number }) {
   );
 }
 
-interface SourceDialogResult {
+export interface SourceDialogResult {
   name: string;
   source: VideoSource;
   titleMode: 'auto' | 'manual';
+  saveToLibrary: boolean;
 }
 
-function SourceDialog({
+export function SourceDialog({
   kind,
   tile,
   onSubmit,
   onClose,
+  returnFocus,
 }: {
-  kind: 'add' | 'edit' | 'replace';
+  kind: 'add' | 'edit' | 'replace' | 'save';
   tile?: Tile;
   onSubmit: (result: SourceDialogResult) => Promise<void>;
   onClose: () => void;
+  returnFocus?: HTMLElement | null;
 }) {
-  const [name, setName] = useState(tile?.name ?? '');
-  const [url, setUrl] = useState(kind === 'edit' ? (tile?.source.url ?? '') : '');
-  const [titleMode, setTitleMode] = useState<'auto' | 'manual'>(tile?.titleMode ?? 'manual');
+  const initialName = tile?.name ?? '';
+  const initialUrl = kind === 'edit' || kind === 'save' ? (tile?.source.url ?? '') : '';
+  const initialTitleMode = tile?.titleMode ?? 'manual';
+  const [name, setName] = useState(initialName);
+  const [url, setUrl] = useState(initialUrl);
+  const [titleMode, setTitleMode] = useState<'auto' | 'manual'>(initialTitleMode);
+  const [saveToLibrary, setSaveToLibrary] = useState(kind === 'save');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [titleLoading, setTitleLoading] = useState(false);
   const modeTouched = useRef(false);
   const lookupTimer = useRef<number | undefined>(undefined);
-  const heading = kind === 'add' ? 'Add source' : kind === 'replace' ? 'Replace Now' : 'Edit tile';
+  const heading =
+    kind === 'add'
+      ? 'Add source'
+      : kind === 'replace'
+        ? 'Replace Now'
+        : kind === 'save'
+          ? 'Save Source'
+          : 'Edit tile';
+  const dirty =
+    name !== initialName ||
+    url !== initialUrl ||
+    titleMode !== initialTitleMode ||
+    (kind !== 'save' && saveToLibrary);
+  function requestClose() {
+    if (dirty && !confirm('Discard your unsaved changes?')) return;
+    onClose();
+  }
 
   function sourceFor(value = url) {
     try {
@@ -134,14 +157,35 @@ function SourceDialog({
   }
 
   useEffect(() => () => clearTimeout(lookupTimer.current), []);
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.setTimeout(() => returnFocus?.focus(), 0);
+    };
+  }, [returnFocus]);
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        if (dirty && !confirm('Discard your unsaved changes?')) return;
+        onClose();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [dirty, onClose]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     try {
-      const source = kind === 'edit' ? tile!.source : detectSource(url);
+      const source = kind === 'edit' || kind === 'save' ? tile!.source : detectSource(url);
       setBusy(true);
       const finalName = await finalizeTitle(source, titleMode, name);
-      await onSubmit({ name: finalName, source, titleMode });
+      await onSubmit({ name: finalName, source, titleMode, saveToLibrary });
       onClose();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'That source could not be saved.');
@@ -155,104 +199,138 @@ function SourceDialog({
     <div
       className="modal-backdrop"
       role="presentation"
-      onMouseDown={(event) => event.target === event.currentTarget && onClose()}
+      data-testid="source-dialog-backdrop"
+      onMouseDown={(event) => event.target === event.currentTarget && requestClose()}
     >
-      <form className="source-dialog" onSubmit={submit}>
+      <form
+        className="source-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="source-dialog-title"
+        onSubmit={submit}
+      >
         <div className="dialog-heading">
           <div>
             <span className="eyebrow">SOURCE SETUP</span>
-            <h2>{heading}</h2>
+            <h2 id="source-dialog-title">{heading}</h2>
           </div>
-          <button type="button" className="icon-button" onClick={onClose} aria-label="Close">
+          <button
+            type="button"
+            className="icon-button dialog-close"
+            onClick={requestClose}
+            aria-label="Close Save Source dialog"
+            title="Close dialog"
+          >
             <X />
           </button>
         </div>
-        {kind === 'replace' && tile && (
-          <div className="replacement-comparison">
-            <span>EXISTING SOURCE</span>
-            <strong>{tile.source.url}</strong>
-          </div>
-        )}
-        {kind !== 'edit' && (
+        <div className="dialog-body">
+          {kind === 'replace' && tile && (
+            <div className="replacement-comparison">
+              <span>EXISTING SOURCE</span>
+              <strong>{tile.source.url}</strong>
+            </div>
+          )}
+          {kind !== 'edit' && kind !== 'save' && (
+            <label>
+              {kind === 'replace' ? 'Replacement URL' : 'Source URL'}
+              <input
+                autoFocus
+                value={url}
+                onChange={(event) => updateUrl(event.target.value)}
+                placeholder="https://youtube.com/watch?v=…"
+                inputMode="url"
+              />
+            </label>
+          )}
+          {kind === 'save' && tile && (
+            <div className="replacement-comparison proposed">
+              <span>CURRENT SOURCE</span>
+              <strong>{tile.source.url}</strong>
+            </div>
+          )}
+          {kind === 'replace' && proposed && (
+            <div className="replacement-comparison proposed">
+              <span>PROPOSED REPLACEMENT</span>
+              <strong>
+                {proposed.type.toUpperCase()} · {proposed.url}
+              </strong>
+            </div>
+          )}
+          <fieldset className="title-mode">
+            <legend>Title</legend>
+            <label>
+              <input
+                type="radio"
+                name="title-mode"
+                checked={titleMode === 'auto'}
+                disabled={proposed?.type !== 'youtube'}
+                onChange={() => {
+                  modeTouched.current = true;
+                  setTitleMode('auto');
+                  void lookupTitle();
+                }}
+              />
+              Automatic title
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="title-mode"
+                checked={titleMode === 'manual'}
+                onChange={() => {
+                  modeTouched.current = true;
+                  setTitleMode('manual');
+                }}
+              />
+              Manual title
+            </label>
+          </fieldset>
           <label>
-            {kind === 'replace' ? 'Replacement URL' : 'Source URL'}
+            Tile title
             <input
-              autoFocus
-              value={url}
-              onChange={(event) => updateUrl(event.target.value)}
-              placeholder="https://youtube.com/watch?v=…"
-              inputMode="url"
-            />
-          </label>
-        )}
-        {kind === 'replace' && proposed && (
-          <div className="replacement-comparison proposed">
-            <span>PROPOSED REPLACEMENT</span>
-            <strong>
-              {proposed.type.toUpperCase()} · {proposed.url}
-            </strong>
-          </div>
-        )}
-        <fieldset className="title-mode">
-          <legend>Title</legend>
-          <label>
-            <input
-              type="radio"
-              name="title-mode"
-              checked={titleMode === 'auto'}
-              disabled={proposed?.type !== 'youtube'}
-              onChange={() => {
-                modeTouched.current = true;
-                setTitleMode('auto');
-                void lookupTitle();
+              value={name}
+              onChange={(event) => {
+                setName(event.target.value);
+                if (titleMode === 'auto') {
+                  modeTouched.current = true;
+                  setTitleMode('manual');
+                }
               }}
+              placeholder="Main stage"
+              maxLength={160}
             />
-            Automatic title
           </label>
-          <label>
-            <input
-              type="radio"
-              name="title-mode"
-              checked={titleMode === 'manual'}
-              onChange={() => {
-                modeTouched.current = true;
-                setTitleMode('manual');
-              }}
-            />
-            Manual title
-          </label>
-        </fieldset>
-        <label>
-          Tile title
-          <input
-            value={name}
-            onChange={(event) => {
-              setName(event.target.value);
-              if (titleMode === 'auto') {
-                modeTouched.current = true;
-                setTitleMode('manual');
-              }
-            }}
-            placeholder="Main stage"
-            maxLength={160}
-          />
-        </label>
-        {titleLoading && (
-          <p className="title-loading">
-            <RefreshCw className="spin" size={14} /> Loading YouTube title…
+          {titleLoading && (
+            <p className="title-loading">
+              <RefreshCw className="spin" size={14} /> Loading YouTube title…
+            </p>
+          )}
+          {titleMode === 'auto' && proposed?.type === 'youtube' && !titleLoading && (
+            <button type="button" className="refresh-title" onClick={() => void lookupTitle()}>
+              <RefreshCw size={14} /> Refresh title
+            </button>
+          )}
+          <p className="helper">
+            Automatic YouTube titles are looked up once. You can always type a manual title instead.
           </p>
-        )}
-        {titleMode === 'auto' && proposed?.type === 'youtube' && !titleLoading && (
-          <button type="button" className="refresh-title" onClick={() => void lookupTitle()}>
-            <RefreshCw size={14} /> Refresh title
-          </button>
-        )}
-        <p className="helper">
-          Automatic YouTube titles are looked up once. You can always type a manual title instead.
-        </p>
-        {error && <p className="form-error">{error}</p>}
+          {error && <p className="form-error">{error}</p>}
+          {kind !== 'save' && (
+            <label className="save-library-option">
+              <input
+                type="checkbox"
+                checked={saveToLibrary}
+                onChange={(event) => setSaveToLibrary(event.target.checked)}
+              />
+              <span>
+                <strong>Save to Library</strong>
+                <small>Keep this source for reuse. Recents are still recorded automatically.</small>
+              </span>
+            </label>
+          )}
+        </div>
         <div className="dialog-actions">
-          <button type="button" className="secondary" onClick={onClose}>
+          <button type="button" className="secondary" onClick={requestClose}>
             Cancel
           </button>
           <button className="primary" disabled={busy || titleLoading}>
@@ -283,7 +361,9 @@ function TileCard({
   onDragStart,
   onQueue,
   onPlayNext,
-  onSaveFavorite,
+  libraryEntry,
+  onSaveToLibrary,
+  onToggleFavorite,
 }: {
   tile: Tile;
   isActiveAudio: boolean;
@@ -306,7 +386,9 @@ function TileCard({
   onDragStart: (event: DragEvent<HTMLButtonElement>) => void;
   onQueue: (source: VideoSource) => Promise<unknown>;
   onPlayNext: () => Promise<unknown>;
-  onSaveFavorite: () => Promise<unknown>;
+  libraryEntry?: import('../lib/types').LibrarySource;
+  onSaveToLibrary: (trigger: HTMLElement) => void;
+  onToggleFavorite: () => Promise<unknown>;
 }) {
   const [queueUrl, setQueueUrl] = useState('');
   const [delay, setDelay] = useState(60);
@@ -469,7 +551,11 @@ function TileCard({
             onChange={(event) => setQueueUrl(event.target.value)}
             placeholder="Paste next source URL"
           />
-          <button onClick={queue} disabled={!queueUrl}>
+          <button
+            onClick={queue}
+            disabled={!queueUrl}
+            title={!queueUrl ? 'Paste a source URL before queueing.' : 'Queue this source'}
+          >
             Queue
           </button>
         </div>
@@ -531,7 +617,35 @@ function TileCard({
         <button onClick={onEdit}>
           <Pencil size={15} /> Edit title
         </button>
-        <button onClick={() => void onSaveFavorite()}>☆ Save favorite</button>
+        <button
+          onClick={(event) => onSaveToLibrary(event.currentTarget)}
+          disabled={libraryEntry?.saved}
+          title={
+            libraryEntry?.saved
+              ? 'This source is already saved in the Source Library.'
+              : 'Save this active source for reuse.'
+          }
+        >
+          {libraryEntry?.saved ? 'Saved to Library' : 'Save to Library'}
+        </button>
+        <button
+          onClick={() => void onToggleFavorite()}
+          disabled={!libraryEntry?.saved}
+          aria-label={
+            libraryEntry?.favorite
+              ? `Remove ${tile.name} from favorites`
+              : `Add ${tile.name} to favorites`
+          }
+          title={
+            libraryEntry?.saved
+              ? libraryEntry.favorite
+                ? 'Remove from favorites'
+                : 'Add this saved source to favorites'
+              : 'Save to Library before adding this source to favorites.'
+          }
+        >
+          {libraryEntry?.favorite ? '★ Favorited' : '☆ Add to favorites'}
+        </button>
         <button className="danger-link" onClick={onDelete}>
           <Trash2 size={15} /> Delete
         </button>
@@ -540,7 +654,12 @@ function TileCard({
   );
 }
 
-type DialogState = { mode: 'add' } | { mode: 'edit'; tile: Tile } | { mode: 'replace'; tile: Tile };
+type DialogState = { returnFocus?: HTMLElement | null } & (
+  | { mode: 'add' }
+  | { mode: 'edit'; tile: Tile }
+  | { mode: 'replace'; tile: Tile }
+  | { mode: 'save'; tile: Tile }
+);
 
 export function AdminPage() {
   const { state, save, saveLibrary, importLibrary, connected, command, healthByTile, stateError } =
@@ -560,6 +679,37 @@ export function AdminPage() {
       ...current,
       tiles: current.tiles.map((tile) => (tile.id === id ? change(tile) : tile)),
     }));
+
+  function openDialog(next: DialogState, trigger?: HTMLElement | null) {
+    setDialog({
+      ...next,
+      returnFocus: trigger ?? (document.activeElement as HTMLElement | null),
+    });
+  }
+
+  useEffect(() => {
+    if (!globalMessage) return;
+    const timer = window.setTimeout(() => setGlobalMessage(''), 5_000);
+    return () => clearTimeout(timer);
+  }, [globalMessage]);
+
+  async function toggleFavorite(tile: Tile) {
+    const canonical = canonicalSourceUrl(tile.source);
+    const entry = normalizeSourceLibrary(state.library).entries.find(
+      (candidate) => candidate.canonicalUrl === canonical,
+    );
+    if (!entry?.saved) {
+      setGlobalMessage('Save this source to the Source Library before adding it to favorites.');
+      return;
+    }
+    const favorite = !entry.favorite;
+    await saveLibrary(setLibraryFavorite(state.library, entry.id, favorite));
+    setGlobalMessage(
+      favorite
+        ? `Added ‘${entry.title}’ to favorites.`
+        : `Removed ‘${entry.title}’ from favorites.`,
+    );
+  }
 
   useEffect(() => {
     let active = true;
@@ -703,6 +853,20 @@ export function AdminPage() {
             {stateError}
           </div>
         )}
+        {globalMessage && (
+          <div className="feedback-banner" role="status">
+            <span>{globalMessage}</span>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Dismiss notification"
+              title="Dismiss notification"
+              onClick={() => setGlobalMessage('')}
+            >
+              <X size={16} />
+            </button>
+          </div>
+        )}
         <header className="topbar">
           <div>
             <span className="eyebrow">CONTROL ROOM</span>
@@ -739,7 +903,7 @@ export function AdminPage() {
             <button
               className="primary"
               disabled={state.tiles.length >= 9}
-              onClick={() => setDialog({ mode: 'add' })}
+              onClick={(event) => openDialog({ mode: 'add' }, event.currentTarget)}
             >
               <Plus size={17} /> Add Source
             </button>
@@ -818,11 +982,6 @@ export function AdminPage() {
               </button>
             )}
           </div>
-          {globalMessage && (
-            <p className="global-message" role="status">
-              {globalMessage}
-            </p>
-          )}
         </section>
         {Object.values(healthByTile).some((health) => health.status === 'failed') && (
           <div className="health-notice" role="alert">
@@ -946,6 +1105,7 @@ export function AdminPage() {
           saveState={patchState}
           saveLibrary={saveLibrary}
           importLibrary={importLibrary}
+          onFeedback={setGlobalMessage}
         />
         {state.tiles.length === 0 ? (
           <section className="admin-empty">
@@ -955,7 +1115,10 @@ export function AdminPage() {
             <span className="eyebrow">YOUR WALL IS STANDING BY</span>
             <h2>Add your first video source</h2>
             <p>Start with a YouTube video, live stream, HLS feed, or embeddable website.</p>
-            <button className="primary" onClick={() => setDialog({ mode: 'add' })}>
+            <button
+              className="primary"
+              onClick={(event) => openDialog({ mode: 'add' }, event.currentTarget)}
+            >
               <Plus /> Add Source
             </button>
           </section>
@@ -984,8 +1147,8 @@ export function AdminPage() {
                   isActiveAudio={state.activeAudioTileId === tile.id}
                   onSave={(change) => patchTile(tile.id, change)}
                   onDelete={() => deleteTile(tile)}
-                  onEdit={() => setDialog({ mode: 'edit', tile })}
-                  onReplace={() => setDialog({ mode: 'replace', tile })}
+                  onEdit={() => openDialog({ mode: 'edit', tile })}
+                  onReplace={() => openDialog({ mode: 'replace', tile })}
                   onRefreshTitle={() => void refreshTitle(tile)}
                   health={healthByTile[tile.id]}
                   onRetry={() => void command(tile.id, 'retry')}
@@ -1020,19 +1183,11 @@ export function AdminPage() {
                     })
                   }
                   onPlayNext={() => patchState((current) => playNextSource(current, tile.id))}
-                  onSaveFavorite={async () => {
-                    const used = recordSourceInState(
-                      state,
-                      tile.source,
-                      tile.name,
-                      tile.titleMode,
-                    ).library;
-                    const canonical = canonicalSourceUrl(tile.source);
-                    const entry = used.entries.find(
-                      (candidate) => candidate.canonicalUrl === canonical,
-                    );
-                    if (entry) await saveLibrary(setLibraryFavorite(used, entry.id, true));
-                  }}
+                  libraryEntry={normalizeSourceLibrary(state.library).entries.find(
+                    (entry) => entry.canonicalUrl === canonicalSourceUrl(tile.source),
+                  )}
+                  onSaveToLibrary={(trigger) => openDialog({ mode: 'save', tile }, trigger)}
+                  onToggleFavorite={() => toggleFavorite(tile)}
                   onCommand={(name, value) => {
                     if (name === 'unmute') void setAudio(tile.id);
                     else {
@@ -1085,18 +1240,24 @@ export function AdminPage() {
       {dialog?.mode === 'add' && (
         <SourceDialog
           kind="add"
+          returnFocus={dialog.returnFocus}
           onClose={() => setDialog(undefined)}
-          onSubmit={async ({ name, source, titleMode }) => {
+          onSubmit={async ({ name, source, titleMode, saveToLibrary }) => {
             await patchState((current) => {
               const recorded = recordSourceInState(current, source, name, titleMode);
+              const library = saveToLibrary
+                ? saveLibrarySource(recorded.library, source, name, titleMode)
+                : recorded.library;
               return {
                 ...recorded,
+                library,
                 tiles: [
                   ...recorded.tiles,
                   { ...newTile(name, source, titleMode), displayOrder: recorded.tiles.length },
                 ],
               };
             });
+            if (saveToLibrary) setGlobalMessage(`Saved ‘${name}’ to Source Library.`);
           }}
         />
       )}
@@ -1104,9 +1265,19 @@ export function AdminPage() {
         <SourceDialog
           kind="edit"
           tile={dialog.tile}
+          returnFocus={dialog.returnFocus}
           onClose={() => setDialog(undefined)}
-          onSubmit={async ({ name, titleMode }) => {
-            await patchTile(dialog.tile.id, (tile) => ({ ...tile, name, titleMode }));
+          onSubmit={async ({ name, source, titleMode, saveToLibrary }) => {
+            await patchState((current) => ({
+              ...current,
+              tiles: current.tiles.map((tile) =>
+                tile.id === dialog.tile.id ? { ...tile, name, titleMode } : tile,
+              ),
+              library: saveToLibrary
+                ? saveLibrarySource(current.library, source, name, titleMode)
+                : current.library,
+            }));
+            if (saveToLibrary) setGlobalMessage(`Saved ‘${name}’ to Source Library.`);
           }}
         />
       )}
@@ -1114,16 +1285,36 @@ export function AdminPage() {
         <SourceDialog
           kind="replace"
           tile={dialog.tile}
+          returnFocus={dialog.returnFocus}
           onClose={() => setDialog(undefined)}
-          onSubmit={async ({ name, source, titleMode }) => {
-            await patchState((current) =>
-              recordSourceInState(
+          onSubmit={async ({ name, source, titleMode, saveToLibrary }) => {
+            await patchState((current) => {
+              const recorded = recordSourceInState(
                 replaceTileSource(current, dialog.tile.id, { name, source, titleMode }),
                 source,
                 name,
                 titleMode,
-              ),
-            );
+              );
+              return {
+                ...recorded,
+                library: saveToLibrary
+                  ? saveLibrarySource(recorded.library, source, name, titleMode)
+                  : recorded.library,
+              };
+            });
+            if (saveToLibrary) setGlobalMessage(`Saved ‘${name}’ to Source Library.`);
+          }}
+        />
+      )}
+      {dialog?.mode === 'save' && (
+        <SourceDialog
+          kind="save"
+          tile={dialog.tile}
+          returnFocus={dialog.returnFocus}
+          onClose={() => setDialog(undefined)}
+          onSubmit={async ({ name, source, titleMode }) => {
+            await saveLibrary(saveLibrarySource(state.library, source, name, titleMode));
+            setGlobalMessage(`Saved ‘${name}’ to Source Library.`);
           }}
         />
       )}

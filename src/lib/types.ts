@@ -52,6 +52,7 @@ export interface LibrarySource {
   source: VideoSource;
   title: string;
   titleMode: 'auto' | 'manual';
+  saved: boolean;
   favorite: boolean;
   recent: boolean;
   folderId?: string;

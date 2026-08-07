@@ -73,8 +73,9 @@ export function normalizeSourceLibrary(value: unknown, now = Date.now()): Source
     const title = typeof candidate.title === 'string' ? candidate.title.trim().slice(0, 160) : '';
     if (!title) continue;
     const favorite = candidate.favorite === true;
+    const saved = candidate.saved === true || favorite;
     const recent = candidate.recent !== false;
-    if (!favorite && !recent) continue;
+    if (!saved && !recent) continue;
     const createdAt = finiteTime(candidate.createdAt, now);
     const updatedAt = finiteTime(candidate.updatedAt, createdAt);
     const lastUsedAt = finiteTime(candidate.lastUsedAt, updatedAt);
@@ -85,10 +86,11 @@ export function normalizeSourceLibrary(value: unknown, now = Date.now()): Source
       title,
       titleMode:
         candidate.titleMode === 'auto' && parsed.source.type === 'youtube' ? 'auto' : 'manual',
+      saved,
       favorite,
       recent,
       folderId:
-        favorite && typeof candidate.folderId === 'string' && folderIds.has(candidate.folderId)
+        saved && typeof candidate.folderId === 'string' && folderIds.has(candidate.folderId)
           ? candidate.folderId
           : undefined,
       hostname: new URL(parsed.originalUrl).hostname,
@@ -114,7 +116,7 @@ export function normalizeSourceLibrary(value: unknown, now = Date.now()): Source
     .map((entry) =>
       entry.recent && !retainedRecent.has(entry.id) ? { ...entry, recent: false } : entry,
     )
-    .filter((entry) => entry.favorite || entry.recent)
+    .filter((entry) => entry.saved || entry.recent)
     .sort((a, b) => b.lastUsedAt - a.lastUsedAt || a.title.localeCompare(b.title));
   return { version: 1, entries, folders };
 }
@@ -148,6 +150,7 @@ export function recordLibraryUse(
         source,
         title: title.trim() || new URL(source.url).hostname,
         titleMode: titleMode === 'auto' && source.type === 'youtube' ? 'auto' : 'manual',
+        saved: false,
         favorite: false,
         recent: true,
         hostname: new URL(source.url).hostname,
@@ -165,11 +168,57 @@ export function recordLibraryUse(
   );
 }
 
+export function saveLibrarySource(
+  library: SourceLibrary,
+  source: VideoSource,
+  title: string,
+  titleMode: 'auto' | 'manual' = 'manual',
+  now = Date.now(),
+): SourceLibrary {
+  const normalized = normalizeSourceLibrary(library, now);
+  const canonicalUrl = canonicalSourceUrl(source);
+  const existing = normalized.entries.find((entry) => entry.canonicalUrl === canonicalUrl);
+  const entry: LibrarySource = existing
+    ? {
+        ...existing,
+        originalUrl: source.url,
+        source,
+        title: title.trim() || existing.title,
+        titleMode: titleMode === 'auto' && source.type === 'youtube' ? 'auto' : 'manual',
+        saved: true,
+        updatedAt: now,
+      }
+    : {
+        id: id(),
+        originalUrl: source.url,
+        canonicalUrl,
+        source,
+        title: title.trim() || new URL(source.url).hostname,
+        titleMode: titleMode === 'auto' && source.type === 'youtube' ? 'auto' : 'manual',
+        saved: true,
+        favorite: false,
+        recent: false,
+        hostname: new URL(source.url).hostname,
+        createdAt: now,
+        updatedAt: now,
+        lastUsedAt: now,
+        useCount: 1,
+      };
+  return normalizeSourceLibrary(
+    {
+      ...normalized,
+      entries: [...normalized.entries.filter((item) => item.canonicalUrl !== canonicalUrl), entry],
+    },
+    now,
+  );
+}
+
 export function clearLibraryRecents(library: SourceLibrary): SourceLibrary {
+  const normalized = normalizeSourceLibrary(library);
   return normalizeSourceLibrary({
-    ...library,
-    entries: library.entries
-      .filter((entry) => entry.favorite)
+    ...normalized,
+    entries: normalized.entries
+      .filter((entry) => entry.saved)
       .map((entry) => ({ ...entry, recent: false, folderId: entry.folderId })),
   });
 }
@@ -180,12 +229,13 @@ export function setLibraryFavorite(
   favorite: boolean,
   now = Date.now(),
 ): SourceLibrary {
+  const normalized = normalizeSourceLibrary(library, now);
+  const entry = normalized.entries.find((candidate) => candidate.id === entryId);
+  if (!entry?.saved) return normalized;
   return normalizeSourceLibrary({
-    ...library,
-    entries: library.entries.map((entry) =>
-      entry.id === entryId
-        ? { ...entry, favorite, folderId: favorite ? entry.folderId : undefined, updatedAt: now }
-        : entry,
+    ...normalized,
+    entries: normalized.entries.map((entry) =>
+      entry.id === entryId ? { ...entry, favorite, updatedAt: now } : entry,
     ),
   });
 }
@@ -279,7 +329,7 @@ export function deleteLibraryFolder(library: SourceLibrary, folderId: string) {
   });
 }
 
-export type LibraryFilter = 'all' | 'favorites' | 'recents';
+export type LibraryFilter = 'all' | 'saved' | 'favorites' | 'recents';
 export type LibrarySort = 'recent' | 'name' | 'used';
 
 export function selectLibraryEntries(
@@ -295,6 +345,7 @@ export function selectLibraryEntries(
   const search = (options.search ?? '').trim().toLocaleLowerCase();
   const folderNames = new Map(library.folders.map((folder) => [folder.id, folder.name]));
   return library.entries
+    .filter((entry) => options.filter !== 'saved' || entry.saved)
     .filter((entry) => options.filter !== 'favorites' || entry.favorite)
     .filter((entry) => options.filter !== 'recents' || entry.recent)
     .filter(
@@ -431,8 +482,9 @@ export function mergeLibraryImport(
         ...existing,
         title: incoming.title,
         titleMode: incoming.titleMode,
+        saved: existing.saved || incoming.saved,
         favorite: existing.favorite || incoming.favorite,
-        folderId: incoming.favorite ? folderId : existing.folderId,
+        folderId: incoming.saved ? folderId : existing.folderId,
         updatedAt: incoming.updatedAt,
       });
     }

@@ -1,10 +1,11 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   clearLibraryRecents,
   createLibraryFolder,
   deleteLibraryFolder,
   moveLibraryFolder,
   renameLibraryFolder,
+  saveLibrarySource,
   selectLibraryEntries,
   setLibraryFavorite,
   updateLibraryEntry,
@@ -26,21 +27,28 @@ interface Props {
   saveState: (change: (state: WallState) => WallState) => Promise<unknown>;
   saveLibrary: (library: SourceLibrary) => Promise<unknown>;
   importLibrary: (payload: unknown) => Promise<{ state: WallState; backupPath: string }>;
+  onFeedback: (message: string) => void;
 }
 
-export function SourceLibraryPanel({ state, saveState, saveLibrary, importLibrary }: Props) {
+export function SourceLibraryPanel({
+  state,
+  saveState,
+  saveLibrary,
+  importLibrary,
+  onFeedback,
+}: Props) {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<LibraryFilter>('all');
   const [type, setType] = useState('all');
   const [folderId, setFolderId] = useState('all');
   const [sort, setSort] = useState<LibrarySort>('recent');
   const [targetTileId, setTargetTileId] = useState(state.tiles[0]?.id ?? '');
-  const [message, setMessage] = useState('');
   const [pendingImport, setPendingImport] = useState<{
     payload: unknown;
     preview: LibraryImportPreview;
   }>();
   const importInput = useRef<HTMLInputElement>(null);
+  const importTrigger = useRef<HTMLButtonElement>(null);
   const entries = useMemo(
     () => selectLibraryEntries(state.library, { search, filter, type, folderId, sort }),
     [filter, folderId, search, sort, state.library, type],
@@ -49,28 +57,53 @@ export function SourceLibraryPanel({ state, saveState, saveLibrary, importLibrar
     ? targetTileId
     : (state.tiles[0]?.id ?? '');
 
+  useEffect(() => {
+    if (!pendingImport) return;
+    const trigger = importTrigger.current;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPendingImport(undefined);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      document.body.style.overflow = previousOverflow;
+      window.setTimeout(() => trigger?.focus(), 0);
+    };
+  }, [pendingImport]);
+
   async function favorite(entry: LibrarySource) {
-    if (
-      entry.favorite &&
-      !entry.recent &&
-      !confirm(`Remove “${entry.title}” from the Source Library?`)
-    )
+    if (!entry.saved) {
+      onFeedback('Save this source to the Source Library before adding it to favorites.');
       return;
-    await saveLibrary(setLibraryFavorite(state.library, entry.id, !entry.favorite));
+    }
+    const favorite = !entry.favorite;
+    await saveLibrary(setLibraryFavorite(state.library, entry.id, favorite));
+    onFeedback(
+      favorite
+        ? `Added ‘${entry.title}’ to favorites.`
+        : `Removed ‘${entry.title}’ from favorites.`,
+    );
+  }
+
+  async function saveSource(entry: LibrarySource) {
+    await saveLibrary(saveLibrarySource(state.library, entry.source, entry.title, entry.titleMode));
+    onFeedback(`Saved ‘${entry.title}’ to Source Library.`);
   }
 
   async function addAsTile(entry: LibrarySource) {
     if (state.tiles.length >= 9)
-      return setMessage('The wall already has the maximum of nine tiles.');
+      return onFeedback('The wall already has the maximum of nine tiles.');
     await saveState((current) =>
       addSourceAsTile(current, entry.source, entry.title, entry.titleMode),
     );
-    setMessage(`Added “${entry.title}” as a tile.`);
+    onFeedback(`Added ‘${entry.title}’ as a tile.`);
   }
 
   async function replaceTile(entry: LibrarySource) {
     const tile = state.tiles.find((candidate) => candidate.id === resolvedTargetTileId);
-    if (!tile) return setMessage('Choose an active tile first.');
+    if (!tile) return onFeedback('Choose an active tile first.');
     if (
       !confirm(
         `Replace “${tile.name}” (${tile.source.url}) with “${entry.title}” (${entry.originalUrl})?`,
@@ -89,12 +122,12 @@ export function SourceLibraryPanel({ state, saveState, saveLibrary, importLibrar
         entry.titleMode,
       ),
     );
-    setMessage(`Replaced “${tile.name}” without changing other players.`);
+    onFeedback(`Replaced ‘${tile.name}’ without changing other players.`);
   }
 
   async function queueForTile(entry: LibrarySource) {
     const tile = state.tiles.find((candidate) => candidate.id === resolvedTargetTileId);
-    if (!tile) return setMessage('Choose an active tile first.');
+    if (!tile) return onFeedback('Choose an active tile first.');
     if (
       tile.queuedSource &&
       !confirm(`“${tile.name}” already has ${tile.queuedSource.url} queued. Replace it?`)
@@ -110,12 +143,12 @@ export function SourceLibraryPanel({ state, saveState, saveLibrary, importLibrar
         Boolean(tile.queuedSource),
       ),
     );
-    setMessage(`Queued “${entry.title}” for “${tile.name}”.`);
+    onFeedback(`Queued ‘${entry.title}’ for ‘${tile.name}’.`);
   }
 
   async function copyUrl(entry: LibrarySource) {
     await navigator.clipboard.writeText(entry.canonicalUrl);
-    setMessage('Copied the canonical source URL.');
+    onFeedback('Copied the canonical source URL.');
   }
 
   async function createFolder() {
@@ -182,7 +215,11 @@ export function SourceLibraryPanel({ state, saveState, saveLibrary, importLibrar
           <a className="secondary" href="/api/library/export" download>
             Export
           </a>
-          <button className="secondary" onClick={() => importInput.current?.click()}>
+          <button
+            ref={importTrigger}
+            className="secondary"
+            onClick={() => importInput.current?.click()}
+          >
             Import
           </button>
           <input
@@ -195,8 +232,15 @@ export function SourceLibraryPanel({ state, saveState, saveLibrary, importLibrar
           <button onClick={() => void createFolder()}>New folder</button>
           <button
             disabled={!state.library.entries.some((entry) => entry.recent)}
+            title={
+              state.library.entries.some((entry) => entry.recent)
+                ? 'Remove automatic Recent labels without deleting saved sources.'
+                : 'There are no Recent entries to clear.'
+            }
             onClick={() => {
-              if (confirm('Clear recent sources? Favorites and active tiles will remain saved.'))
+              if (
+                confirm('Clear recent sources? Saved sources, favorites, and active tiles remain.')
+              )
                 void saveLibrary(clearLibraryRecents(state.library));
             }}
           >
@@ -245,6 +289,7 @@ export function SourceLibraryPanel({ state, saveState, saveLibrary, importLibrar
             onChange={(event) => setFilter(event.target.value as LibraryFilter)}
           >
             <option value="all">All</option>
+            <option value="saved">Saved</option>
             <option value="favorites">Favorites</option>
             <option value="recents">Recents</option>
           </select>
@@ -294,15 +339,10 @@ export function SourceLibraryPanel({ state, saveState, saveLibrary, importLibrar
         </label>
       </div>
 
-      {message && (
-        <p className="library-message" role="status">
-          {message}
-        </p>
-      )}
       {!entries.length ? (
         <div className="library-empty">
-          No matching sources. Add or queue a source to create a Recent, then star it to keep it
-          permanently.
+          No matching sources. Add or queue a source to create an automatic Recent. Use Save to
+          Library to keep it for reuse, then optionally add it to Favorites.
         </div>
       ) : (
         <div className="library-list">
@@ -312,18 +352,32 @@ export function SourceLibraryPanel({ state, saveState, saveLibrary, importLibrar
               <article className="library-source-row" key={entry.id} data-library-id={entry.id}>
                 <button
                   className="favorite-star"
-                  aria-label={`${entry.favorite ? 'Unfavorite' : 'Favorite'} ${entry.title}`}
+                  disabled={!entry.saved}
+                  aria-label={
+                    entry.favorite
+                      ? `Remove ${entry.title} from favorites`
+                      : `Add ${entry.title} to favorites`
+                  }
+                  title={
+                    entry.saved
+                      ? entry.favorite
+                        ? 'Remove from favorites'
+                        : 'Add this saved source to favorites'
+                      : 'Save to Library before adding this source to favorites.'
+                  }
                   onClick={() => void favorite(entry)}
                 >
-                  {entry.favorite ? '★' : '☆'}
+                  {entry.favorite ? '★ Favorited' : '☆ Add to favorites'}
                 </button>
                 <div className="library-source-copy">
                   <strong>{entry.title}</strong>
-                  <span>
+                  <span className="library-entry-labels">
                     {entry.source.type === 'website'
                       ? 'WEBSITE · BEST EFFORT'
-                      : entry.source.type.toUpperCase()}{' '}
-                    {entry.favorite ? '· FAVORITE' : ''} {entry.recent ? '· RECENT' : ''}
+                      : entry.source.type.toUpperCase()}
+                    {entry.recent && <b>Recent</b>}
+                    {entry.saved && <b>Saved</b>}
+                    {entry.favorite && <b>Favorite</b>}
                   </span>
                   <small>{entry.originalUrl}</small>
                   <small>
@@ -332,11 +386,11 @@ export function SourceLibraryPanel({ state, saveState, saveLibrary, importLibrar
                     {new Date(entry.lastUsedAt).toLocaleString()}
                   </small>
                 </div>
-                {entry.favorite && (
+                {entry.saved && (
                   <div className="library-metadata-actions">
                     <button
                       onClick={() => {
-                        const title = prompt('Favorite display name', entry.title);
+                        const title = prompt('Saved source display name', entry.title);
                         if (title !== null)
                           void saveLibrary(updateLibraryEntry(state.library, entry.id, { title }));
                       }}
@@ -386,16 +440,37 @@ export function SourceLibraryPanel({ state, saveState, saveLibrary, importLibrar
                 )}
                 <div className="library-source-actions">
                   <button
+                    disabled={entry.saved}
+                    title={
+                      entry.saved
+                        ? 'This source is already saved for reuse.'
+                        : 'Save this Recent as a reusable library source.'
+                    }
+                    onClick={() => void saveSource(entry)}
+                  >
+                    {entry.saved ? 'Saved to Library' : 'Save to Library'}
+                  </button>
+                  <button
                     disabled={state.tiles.length >= 9}
                     title={state.tiles.length >= 9 ? 'The wall is full (9 of 9).' : ''}
                     onClick={() => void addAsTile(entry)}
                   >
                     Add as Tile
                   </button>
-                  <button disabled={!state.tiles.length} onClick={() => void replaceTile(entry)}>
+                  <button
+                    disabled={!state.tiles.length}
+                    title={!state.tiles.length ? 'Add an active tile before replacing one.' : ''}
+                    onClick={() => void replaceTile(entry)}
+                  >
                     Replace Tile
                   </button>
-                  <button disabled={!state.tiles.length} onClick={() => void queueForTile(entry)}>
+                  <button
+                    disabled={!state.tiles.length}
+                    title={
+                      !state.tiles.length ? 'Add an active tile before queueing a source.' : ''
+                    }
+                    onClick={() => void queueForTile(entry)}
+                  >
                     Queue for Tile
                   </button>
                   <a href={entry.originalUrl} target="_blank" rel="noreferrer">
@@ -410,7 +485,13 @@ export function SourceLibraryPanel({ state, saveState, saveLibrary, importLibrar
       )}
 
       {pendingImport && (
-        <div className="modal-backdrop" role="presentation">
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) =>
+            event.target === event.currentTarget && setPendingImport(undefined)
+          }
+        >
           <div
             className="source-dialog"
             role="dialog"
@@ -422,32 +503,42 @@ export function SourceLibraryPanel({ state, saveState, saveLibrary, importLibrar
                 <span className="eyebrow">IMPORT PREVIEW</span>
                 <h2>Merge Source Library</h2>
               </div>
+              <button
+                type="button"
+                className="icon-button dialog-close"
+                aria-label="Close import preview"
+                onClick={() => setPendingImport(undefined)}
+              >
+                ×
+              </button>
             </div>
-            <dl className="import-preview">
-              <div>
-                <dt>New sources</dt>
-                <dd>{pendingImport.preview.newSources}</dd>
-              </div>
-              <div>
-                <dt>Duplicates</dt>
-                <dd>{pendingImport.preview.duplicates}</dd>
-              </div>
-              <div>
-                <dt>Updated metadata</dt>
-                <dd>{pendingImport.preview.updatedMetadata}</dd>
-              </div>
-              <div>
-                <dt>New folders</dt>
-                <dd>{pendingImport.preview.newFolders}</dd>
-              </div>
-              <div>
-                <dt>Folder conflicts</dt>
-                <dd>{pendingImport.preview.conflictingFolders.join(', ') || 'None'}</dd>
-              </div>
-            </dl>
-            <p>
-              Active wall tiles will not be changed. A state backup is created before this merge.
-            </p>
+            <div className="dialog-body">
+              <dl className="import-preview">
+                <div>
+                  <dt>New sources</dt>
+                  <dd>{pendingImport.preview.newSources}</dd>
+                </div>
+                <div>
+                  <dt>Duplicates</dt>
+                  <dd>{pendingImport.preview.duplicates}</dd>
+                </div>
+                <div>
+                  <dt>Updated metadata</dt>
+                  <dd>{pendingImport.preview.updatedMetadata}</dd>
+                </div>
+                <div>
+                  <dt>New folders</dt>
+                  <dd>{pendingImport.preview.newFolders}</dd>
+                </div>
+                <div>
+                  <dt>Folder conflicts</dt>
+                  <dd>{pendingImport.preview.conflictingFolders.join(', ') || 'None'}</dd>
+                </div>
+              </dl>
+              <p>
+                Active wall tiles will not be changed. A state backup is created before this merge.
+              </p>
+            </div>
             <div className="dialog-actions">
               <button className="secondary" onClick={() => setPendingImport(undefined)}>
                 Cancel
@@ -458,7 +549,7 @@ export function SourceLibraryPanel({ state, saveState, saveLibrary, importLibrar
                   try {
                     const result = await importLibrary(pendingImport.payload);
                     setPendingImport(undefined);
-                    setMessage(`Import complete. Backup: ${result.backupPath}`);
+                    onFeedback(`Import complete. Backup: ${result.backupPath}`);
                   } catch (error) {
                     alert(error instanceof Error ? error.message : 'Import failed.');
                   }

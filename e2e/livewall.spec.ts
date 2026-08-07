@@ -121,6 +121,136 @@ test('title overlays honor Off, On hover, and Always visible modes', async ({
   await context.close();
 });
 
+test('Save Source dialog and disabled controls remain usable at reduced viewports', async ({
+  browser,
+  request,
+}) => {
+  const now = Date.now();
+  await request.put('/api/state', {
+    data: {
+      version: 0,
+      updatedAt: now,
+      layoutMode: 'automatic',
+      tiles: [
+        {
+          id: 'viewport-tile',
+          name: 'Viewport Camera',
+          titleMode: 'manual',
+          source: { type: 'mock', url: 'https://mock.livewall.local/?label=viewport' },
+          x: 0,
+          y: 0,
+          w: 4,
+          h: 4,
+          muted: true,
+          volume: 70,
+          displayOrder: 0,
+        },
+      ],
+      library: {
+        version: 1,
+        folders: [],
+        entries: [
+          {
+            id: 'saved-youtube',
+            originalUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+            canonicalUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+            source: {
+              type: 'youtube',
+              url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+              youtubeId: 'dQw4w9WgXcQ',
+            },
+            title: 'Saved Video',
+            titleMode: 'auto',
+            saved: true,
+            favorite: false,
+            recent: false,
+            createdAt: now,
+            updatedAt: now,
+            lastUsedAt: now,
+            useCount: 1,
+          },
+        ],
+      },
+    },
+  });
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const admin = await context.newPage();
+  await admin.goto('/admin');
+
+  for (const name of [
+    'New folder',
+    'Clear Recents',
+    'Edit name',
+    'Refresh title',
+    'Replace Now',
+    'Save to Library',
+    'Import',
+    'Export',
+  ])
+    await expect(
+      admin.getByRole(name === 'Export' ? 'link' : 'button', { name }).first(),
+    ).toBeVisible();
+  await expect(admin.getByRole('button', { name: 'Queue' }).first()).toBeVisible();
+
+  const disabledStyles = await admin.locator('button:disabled').evaluateAll((buttons) => {
+    const rgb = (value: string) => (value.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number);
+    const luminance = (value: string) => {
+      const [red, green, blue] = rgb(value).map((channel) => {
+        const normalized = channel / 255;
+        return normalized <= 0.03928 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+    };
+    return buttons.map((button) => {
+      const style = getComputedStyle(button);
+      const lighter = Math.max(luminance(style.color), luminance(style.backgroundColor));
+      const darker = Math.min(luminance(style.color), luminance(style.backgroundColor));
+      return {
+        label: button.textContent?.trim(),
+        opacity: Number(style.opacity),
+        contrast: (lighter + 0.05) / (darker + 0.05),
+        background: style.backgroundColor,
+      };
+    });
+  });
+  expect(disabledStyles.length).toBeGreaterThan(0);
+  for (const style of disabledStyles) {
+    expect(style.opacity, style.label).toBeGreaterThanOrEqual(0.9);
+    expect(style.contrast, style.label).toBeGreaterThanOrEqual(4.5);
+    expect(style.background, style.label).not.toBe('rgb(255, 255, 255)');
+  }
+
+  const trigger = admin.getByRole('button', { name: 'Save to Library' }).first();
+  for (const viewport of [
+    { width: 1440, height: 900 },
+    { width: 1152, height: 720 },
+    { width: 960, height: 600 },
+  ]) {
+    await admin.setViewportSize(viewport);
+    await trigger.click();
+    const dialog = admin.getByRole('dialog', { name: 'Save Source' });
+    const box = await dialog.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.y).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width);
+    expect(box!.y + box!.height).toBeLessThanOrEqual(viewport.height);
+    await expect(admin.getByRole('button', { name: 'Cancel' })).toBeVisible();
+    await expect(admin.getByRole('button', { name: 'Save Source', exact: true })).toBeVisible();
+    await admin.getByRole('button', { name: 'Cancel' }).click();
+  }
+  await admin.setViewportSize({ width: 800, height: 400 });
+  await trigger.click();
+  const scroll = await admin.locator('.dialog-body').evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+  }));
+  expect(scroll.scrollHeight).toBeGreaterThan(scroll.clientHeight);
+  await expect(admin.getByRole('button', { name: 'Cancel' })).toBeVisible();
+  await admin.getByRole('button', { name: 'Cancel' }).click();
+  await context.close();
+});
+
 test('Admin controls the open Wall and state survives reload', async ({ browser, request }) => {
   await request.put('/api/state', {
     data: { version: 0, updatedAt: Date.now(), layoutMode: 'automatic', tiles: [] },
@@ -261,17 +391,61 @@ test('Source Library workflow and kiosk Wall controls preserve unrelated players
   await admin.locator('header').getByRole('button', { name: 'Add Source' }).click();
   await admin.getByLabel('Tile title').fill('Library Camera');
   await admin.getByLabel('Source URL').fill('https://mock.livewall.local/?label=library-camera');
+  await expect(admin.getByLabel('Save to Library')).not.toBeChecked();
   await admin.getByRole('button', { name: 'Add source', exact: true }).click();
   const row = admin.locator('.library-source-row').filter({ hasText: 'Library Camera' });
   await expect(row).toBeVisible();
-  await expect(row).toContainText('RECENT');
+  await expect(row.getByText('Recent', { exact: true })).toBeVisible();
+  await expect(row.getByText('Saved', { exact: true })).toHaveCount(0);
+  await expect(wall.locator('.mock-player').first()).toHaveAttribute(
+    'data-instance-id',
+    stableInstance!,
+  );
+  const cameraPlayer = wall.locator('.mock-player').filter({ hasText: 'library-camera' });
+  const cameraInstance = await cameraPlayer.getAttribute('data-instance-id');
+  const cameraCard = admin
+    .locator('[data-testid="admin-tile"]')
+    .filter({ hasText: 'Library Camera' });
+  const saveTrigger = cameraCard.getByRole('button', { name: 'Save to Library' });
+
+  await saveTrigger.click();
+  await admin.getByRole('button', { name: 'Close Save Source dialog' }).click();
+  await expect(saveTrigger).toBeFocused();
+  await saveTrigger.click();
+  await admin.getByRole('button', { name: 'Cancel' }).click();
+  await expect(saveTrigger).toBeFocused();
+  await saveTrigger.click();
+  await admin.keyboard.press('Escape');
+  await expect(saveTrigger).toBeFocused();
+  await saveTrigger.click();
+  await admin.getByTestId('source-dialog-backdrop').click({ position: { x: 4, y: 4 } });
+  await expect(saveTrigger).toBeFocused();
+  await saveTrigger.click();
+  await admin.getByRole('button', { name: 'Save Source', exact: true }).click();
+  await expect(admin.locator('.feedback-banner')).toContainText(
+    'Saved ‘Library Camera’ to Source Library.',
+  );
+  await expect(row.getByText('Saved', { exact: true })).toBeVisible();
+  await admin.getByRole('button', { name: 'Dismiss notification' }).click();
+  await expect(admin.locator('.feedback-banner')).toHaveCount(0);
+  await expect(cameraPlayer).toHaveAttribute('data-instance-id', cameraInstance!);
   await expect(wall.locator('.mock-player').first()).toHaveAttribute(
     'data-instance-id',
     stableInstance!,
   );
 
-  await row.getByRole('button', { name: 'Favorite Library Camera' }).click();
-  await expect(row).toContainText('FAVORITE');
+  await row.getByRole('button', { name: 'Add Library Camera to favorites' }).click();
+  await expect(admin.locator('.feedback-banner')).toContainText(
+    'Added ‘Library Camera’ to favorites.',
+  );
+  await expect(row.getByText('Favorite', { exact: true })).toBeVisible();
+  await row.getByRole('button', { name: 'Remove Library Camera from favorites' }).click();
+  await expect(admin.locator('.feedback-banner')).toContainText(
+    'Removed ‘Library Camera’ from favorites.',
+  );
+  await expect(row.getByText('Favorite', { exact: true })).toHaveCount(0);
+  await expect(cameraPlayer).toHaveAttribute('data-instance-id', cameraInstance!);
+  await expect(admin.locator('.feedback-banner')).toHaveCount(0, { timeout: 6_000 });
   admin.once('dialog', (dialog) => dialog.accept('Cameras'));
   await admin.getByRole('button', { name: 'New folder' }).click();
   await row.getByLabel('Folder').selectOption({ label: 'Cameras' });
@@ -305,8 +479,8 @@ test('Source Library workflow and kiosk Wall controls preserve unrelated players
 
   admin.once('dialog', (dialog) => dialog.accept());
   await admin.getByRole('button', { name: 'Clear Recents' }).click();
-  await expect(row).toContainText('FAVORITE');
-  await expect(row).not.toContainText('RECENT');
+  await expect(row.getByText('Saved', { exact: true })).toBeVisible();
+  await expect(row.getByText('Recent', { exact: true })).toHaveCount(0);
 
   admin.once('dialog', (dialog) => dialog.accept());
   await admin.getByRole('button', { name: 'Close Wall' }).click();
@@ -323,7 +497,7 @@ test('Source Library workflow and kiosk Wall controls preserve unrelated players
   await expect(normal.getByRole('button', { name: 'Enter Fullscreen' })).toBeVisible();
 
   await admin.reload();
-  await admin.getByLabel('Show').selectOption('favorites');
+  await admin.getByLabel('Show').selectOption('saved');
   await expect(
     admin.locator('.library-source-row').filter({ hasText: 'Library Camera' }),
   ).toContainText('Cameras');

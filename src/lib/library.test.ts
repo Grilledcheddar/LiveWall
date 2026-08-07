@@ -12,6 +12,7 @@ import {
   previewLibraryImport,
   recordLibraryUse,
   renameLibraryFolder,
+  saveLibrarySource,
   selectLibraryEntries,
   setLibraryFavorite,
   updateLibraryEntry,
@@ -51,9 +52,67 @@ describe('Source Library', () => {
     expect(library.entries[0].useCount).toBe(4);
   });
 
+  it('keeps automatic Recents, explicit Save, and Favorite as separate operations', () => {
+    const source = mock('separate');
+    let library = recordLibraryUse(emptyLibrary(), source, 'Separate', 'manual', 1);
+    const entryId = library.entries[0].id;
+    expect(library.entries[0]).toMatchObject({ recent: true, saved: false, favorite: false });
+
+    library = setLibraryFavorite(library, entryId, true, 2);
+    expect(library.entries[0].favorite).toBe(false);
+
+    library = saveLibrarySource(library, source, 'Separate', 'manual', 3);
+    expect(library.entries[0]).toMatchObject({ recent: true, saved: true, favorite: false });
+
+    library = setLibraryFavorite(library, entryId, true, 4);
+    expect(library.entries[0]).toMatchObject({ saved: true, favorite: true });
+  });
+
+  it('saves by canonical URL without creating duplicate entries', () => {
+    let library = saveLibrarySource(
+      emptyLibrary(),
+      detectSource('https://youtu.be/dQw4w9WgXcQ'),
+      'First title',
+      'auto',
+      1,
+    );
+    const entryId = library.entries[0].id;
+    library = saveLibrarySource(
+      library,
+      detectSource('https://www.youtube.com/watch?v=dQw4w9WgXcQ&utm_source=test'),
+      'Updated title',
+      'auto',
+      2,
+    );
+    expect(library.entries).toHaveLength(1);
+    expect(library.entries[0]).toMatchObject({
+      id: entryId,
+      saved: true,
+      favorite: false,
+      title: 'Updated title',
+    });
+  });
+
+  it('migrates legacy favorites as saved sources', () => {
+    const recent = recordLibraryUse(emptyLibrary(), mock('legacy-favorite'), 'Legacy', 'manual', 1);
+    const legacy = {
+      ...recent,
+      entries: recent.entries.map((entry) => ({
+        ...entry,
+        saved: undefined,
+        favorite: true,
+      })),
+    };
+    expect(normalizeSourceLibrary(legacy).entries[0]).toMatchObject({
+      saved: true,
+      favorite: true,
+    });
+  });
+
   it('bounds recents without removing favorites', () => {
     let library = emptyLibrary();
     library = recordLibraryUse(library, mock('favorite'), 'Favorite', 'manual', 1);
+    library = saveLibrarySource(library, mock('favorite'), 'Favorite', 'manual', 2);
     library = setLibraryFavorite(library, library.entries[0].id, true, 2);
     for (let index = 0; index < MAX_RECENT_SOURCES + 5; index++)
       library = recordLibraryUse(
@@ -72,6 +131,7 @@ describe('Source Library', () => {
 
   it('clears Recents while preserving favorites', () => {
     let library = recordLibraryUse(emptyLibrary(), mock('keep'), 'Keep', 'manual', 1);
+    library = saveLibrarySource(library, mock('keep'), 'Keep', 'manual', 2);
     library = setLibraryFavorite(library, library.entries[0].id, true, 2);
     library = recordLibraryUse(library, mock('remove'), 'Remove', 'manual', 3);
     const cleared = clearLibraryRecents(library);
@@ -81,6 +141,7 @@ describe('Source Library', () => {
 
   it('favorites, renames, files, and unfavorites without changing source identity', () => {
     let library = recordLibraryUse(emptyLibrary(), mock('item'), 'Item', 'manual', 1);
+    library = saveLibrarySource(library, mock('item'), 'Item', 'manual', 2);
     const sourceId = library.entries[0].id;
     library = setLibraryFavorite(library, sourceId, true, 2);
     library = createLibraryFolder(library, 'News', 3);
@@ -100,7 +161,7 @@ describe('Source Library', () => {
     expect(library.entries[0]).toMatchObject({
       favorite: false,
       recent: true,
-      folderId: undefined,
+      folderId: library.folders[0].id,
     });
   });
 
@@ -111,6 +172,7 @@ describe('Source Library', () => {
     library = moveLibraryFolder(library, library.folders[1].id, -1);
     expect(library.folders.map((folder) => folder.name)).toEqual(['Cameras', 'News']);
     library = recordLibraryUse(library, mock('camera'), 'Camera', 'manual', 4);
+    library = saveLibrarySource(library, mock('camera'), 'Camera', 'manual', 5);
     library = setLibraryFavorite(library, library.entries[0].id, true, 5);
     library = updateLibraryEntry(
       library,
@@ -137,6 +199,7 @@ describe('Source Library', () => {
       'manual',
       20,
     );
+    library = saveLibrarySource(library, mock('alpha'), 'Alpha Cam', 'manual', 21);
     library = setLibraryFavorite(
       library,
       library.entries.find((entry) => entry.title === 'Alpha Cam')!.id,

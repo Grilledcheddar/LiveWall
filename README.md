@@ -41,8 +41,10 @@ LiveWall only listens on `127.0.0.1`. Other computers on the network cannot conn
 - Choose **Focus** on an Admin card or the Wall tile control to enlarge one tile while keeping the other players mounted. `Escape` exits focus when the browser is not in fullscreen.
 - The status strip reports loading, playback, buffering, retry, stopped, unsupported, and failed states. Recoverable adapter failures retry up to three times; **Retry now** starts a fresh retry cycle for only that source.
 - Use **Wall appearance** for overlay visibility, background, gaps, borders, and corner radius. Seamless, Subtle, and Framed presets are included.
-- **Source Library** records sources used by Add, Replace, Queue, Play Next, and library actions. Star permanent favorites, organize them into folders, search/filter/sort them, then add, replace, or queue them without repasting URLs.
-- Recents are deduplicated by canonical source identity and limited to 50. Equivalent YouTube watch, short, live, embed, and `youtu.be` URLs for one video share one entry. Clearing Recents never removes favorites or active tiles.
+- **Source Library** records sources used by Add, Replace, Queue, Play Next, and library actions as automatic **Recents**. Recents are history, not permanent saved sources.
+- Choose **Save to Library** on an active tile, a Recent entry, or inside the Add/Edit/Replace workflow to keep a reusable **Saved** source. Saving the same canonical URL updates the existing entry instead of creating a duplicate.
+- After a source is saved, use **☆ Add to favorites** to mark it as a Favorite; **★ Favorited** removes that mark when selected again. Saving and favoriting are separate operations, and every entry displays its Recent, Saved, and Favorite labels.
+- Recents are deduplicated by canonical source identity and limited to 50. Equivalent YouTube watch, short, live, embed, and `youtu.be` URLs for one video share one entry. Clearing Recents never removes saved sources, favorites, or active tiles.
 - Library exports are versioned JSON. Import shows a merge preview, rejects unsafe URLs, creates a state backup, merges duplicates by canonical identity, and never overwrites active tiles.
 
 Volume changes are sent directly to the selected player while the slider moves and saved after a short debounce. They do not reload the Wall or recreate players.
