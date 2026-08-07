@@ -20,7 +20,28 @@ export function parseYouTubeId(input: string): string | undefined {
   }
 }
 
+export function parseYouTubePlaylistId(input: string): string | undefined {
+  const trimmed = input.trim();
+  if (/^[A-Za-z0-9_-]{10,80}$/.test(trimmed) && /^(?:PL|UU|LL|FL|RD|OLAK5uy_)/.test(trimmed))
+    return trimmed;
+  try {
+    const url = new URL(trimmed);
+    if (!YOUTUBE_HOSTS.has(url.hostname.toLowerCase())) return undefined;
+    const id = url.searchParams.get('list');
+    return id && /^[A-Za-z0-9_-]{10,80}$/.test(id) ? id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function detectSource(input: string): VideoSource {
+  const rawPlaylistId = parseYouTubePlaylistId(input);
+  if (rawPlaylistId && !/^https?:/i.test(input.trim()))
+    return {
+      url: `https://www.youtube.com/playlist?list=${rawPlaylistId}`,
+      type: 'youtube-playlist',
+      playlistId: rawPlaylistId,
+    };
   let url: URL;
   try {
     url = new URL(input.trim());
@@ -32,6 +53,13 @@ export function detectSource(input: string): VideoSource {
   }
   const normalized = url.toString();
   if (url.hostname === 'mock.livewall.local') return { url: normalized, type: 'mock' };
+  const playlistId = parseYouTubePlaylistId(normalized);
+  if (playlistId)
+    return {
+      url: `https://www.youtube.com/playlist?list=${playlistId}`,
+      type: 'youtube-playlist',
+      playlistId,
+    };
   const youtubeId = parseYouTubeId(normalized);
   if (youtubeId) return { url: normalized, type: 'youtube', youtubeId };
   if (/\.m3u8(?:$|[?#])/i.test(normalized)) return { url: normalized, type: 'hls' };
@@ -41,6 +69,9 @@ export function detectSource(input: string): VideoSource {
 export function canonicalSourceUrl(source: VideoSource): string {
   if (source.type === 'youtube' && source.youtubeId) {
     return `https://www.youtube.com/watch?v=${source.youtubeId}`;
+  }
+  if (source.type === 'youtube-playlist' && source.playlistId) {
+    return `https://www.youtube.com/playlist?list=${source.playlistId}`;
   }
   const url = new URL(source.url);
   url.hash = '';

@@ -3,16 +3,47 @@ import express from 'express';
 import { createServer } from 'node:http';
 import path from 'node:path';
 import { WebSocket, WebSocketServer } from 'ws';
-import type { PlayerCommand, PlayerHealth, ServerMessage } from '../src/lib/types.js';
+import type {
+  LayoutTemplateFile,
+  PlaybackProgressFile,
+  PlayerCommand,
+  PlayerHealth,
+  ServerMessage,
+  WallPresetFile,
+} from '../src/lib/types.js';
 import { StateStore } from './state-store.js';
 import { fetchYouTubeTitle } from './youtube-title.js';
 import { exportLibrary } from '../src/lib/library.js';
 import { WallSessionService } from './wall-session.js';
+import { AtomicJsonStore } from './p3-store.js';
+import { normalizePlaybackProgress, playbackKey } from '../src/lib/playback.js';
+import { normalizeLayoutTemplates } from '../src/lib/layouts.js';
+import { normalizeWallPresets } from '../src/lib/walls.js';
+import { detectSource } from '../src/lib/sources.js';
 
 const root = process.cwd();
 const port = Number(process.env.PORT || 4174);
 const host = '127.0.0.1';
 const store = new StateStore(path.join(root, 'data'));
+const dataDirectory = path.join(root, 'data');
+const progressStore = new AtomicJsonStore<PlaybackProgressFile>(
+  dataDirectory,
+  'playback-progress.json',
+  () => normalizePlaybackProgress(undefined),
+  normalizePlaybackProgress,
+);
+const templatesStore = new AtomicJsonStore<LayoutTemplateFile>(
+  dataDirectory,
+  'layout-templates.json',
+  () => normalizeLayoutTemplates(undefined),
+  normalizeLayoutTemplates,
+);
+const presetsStore = new AtomicJsonStore<WallPresetFile>(
+  dataDirectory,
+  'wall-presets.json',
+  () => normalizeWallPresets(undefined),
+  normalizeWallPresets,
+);
 const wallSession = new WallSessionService(root);
 let stateLoadError = '';
 try {
@@ -22,12 +53,29 @@ try {
     'Saved wall data could not be migrated. The original file was preserved; restore a backup or repair the state file, then restart LiveWall.';
   console.error(stateLoadError, error);
 }
+let p3LoadError = '';
+for (const [label, p3Store] of [
+  ['playback progress', progressStore],
+  ['layout templates', templatesStore],
+  ['wall presets', presetsStore],
+] as const) {
+  try {
+    await p3Store.load();
+  } catch (error) {
+    p3LoadError = `${label} could not be migrated. Its original file was preserved.`;
+    console.error(p3LoadError, error);
+  }
+}
 
 const app = express();
 app.use(cors({ origin: [`http://${host}:5173`, `http://${host}:${port}`] }));
 app.use(express.json({ limit: '256kb' }));
 app.get('/api/health', (_req, res) =>
-  res.json({ ok: !stateLoadError, stateError: stateLoadError || undefined }),
+  res.json({
+    ok: !stateLoadError,
+    stateError: stateLoadError || undefined,
+    p3Error: p3LoadError || undefined,
+  }),
 );
 app.get('/api/state', (_req, res) =>
   stateLoadError ? res.status(503).json({ message: stateLoadError }) : res.json(store.get()),
@@ -40,6 +88,116 @@ app.get('/api/youtube-title', async (req, res) => {
     res.status(422).json({
       message: error instanceof Error ? error.message : 'The YouTube title could not be loaded.',
     });
+  }
+});
+
+app.get('/api/playback-progress', (_req, res) => res.json(progressStore.get()));
+app.put('/api/playback-progress', async (req, res) => {
+  try {
+    const source = detectSource(String(req.body?.sourceUrl ?? ''));
+    const key = playbackKey(source);
+    const position = Number(req.body?.position);
+    const duration = Number(req.body?.duration);
+    const playlistIndex = Number(req.body?.playlistIndex);
+    if (!Number.isFinite(position) || position < 0)
+      return res.status(400).json({ message: 'Playback progress was not valid.' });
+    const next = await progressStore.update((current) => ({
+      ...current,
+      entries: [
+        ...current.entries.filter((entry) => entry.key !== key),
+        {
+          key,
+          position,
+          duration: Number.isFinite(duration) && duration > 0 ? duration : undefined,
+          playlistIndex:
+            Number.isInteger(playlistIndex) && playlistIndex >= 0 ? playlistIndex : undefined,
+          updatedAt: Date.now(),
+        },
+      ],
+    }));
+    return res.json(next);
+  } catch {
+    return res.status(400).json({ message: 'Playback progress was not valid.' });
+  }
+});
+app.delete('/api/playback-progress', async (req, res) => {
+  try {
+    const key = playbackKey(detectSource(String(req.query.sourceUrl ?? '')));
+    return res.json(
+      await progressStore.update((current) => ({
+        ...current,
+        entries: current.entries.filter((entry) => entry.key !== key),
+      })),
+    );
+  } catch {
+    return res.status(400).json({ message: 'Playback progress key was not valid.' });
+  }
+});
+
+app.get('/api/layout-templates', (_req, res) => res.json(templatesStore.get()));
+app.put('/api/layout-templates', async (req, res) => {
+  try {
+    return res.json(await templatesStore.replace(req.body));
+  } catch {
+    return res.status(400).json({ message: 'Layout templates were not valid.' });
+  }
+});
+
+app.get('/api/wall-presets', (_req, res) => res.json(presetsStore.get()));
+app.put('/api/wall-presets', async (req, res) => {
+  try {
+    return res.json(await presetsStore.replace(req.body));
+  } catch {
+    return res.status(400).json({ message: 'Wall presets were not valid.' });
+  }
+});
+
+app.get('/api/p3/export', (_req, res) => {
+  res.setHeader('content-disposition', `attachment; filename="livewall-p3-${Date.now()}.json"`);
+  res.json({
+    format: 'livewall-p3',
+    version: 1,
+    exportedAt: Date.now(),
+    templates: templatesStore.get(),
+    presets: presetsStore.get(),
+  });
+});
+
+const previewP3Import = (value: unknown) => {
+  if (!value || typeof value !== 'object' || (value as any).format !== 'livewall-p3')
+    throw new Error('This is not a LiveWall P3 export.');
+  const templates = normalizeLayoutTemplates((value as any).templates);
+  const presets = normalizeWallPresets((value as any).presets);
+  return {
+    templates,
+    presets,
+    templateCount: templates.templates.length,
+    presetCount: presets.presets.length,
+  };
+};
+app.post('/api/p3/import/preview', (req, res) => {
+  try {
+    res.json(previewP3Import(req.body));
+  } catch (error) {
+    res
+      .status(400)
+      .json({ message: error instanceof Error ? error.message : 'Import is invalid.' });
+  }
+});
+app.post('/api/p3/import', async (req, res) => {
+  try {
+    const preview = previewP3Import(req.body);
+    const backups = await Promise.all([
+      templatesStore.backup('layout-templates-import'),
+      presetsStore.backup('wall-presets-import'),
+    ]);
+    const templates = await templatesStore.replace(preview.templates);
+    const presets = await presetsStore.replace(preview.presets);
+    res.json({ templates, presets, backups });
+  } catch (error) {
+    res
+      .status(400)
+      .json({ message: error instanceof Error ? error.message : 'Import is invalid.' });
   }
 });
 

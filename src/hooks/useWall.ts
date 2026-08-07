@@ -1,12 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { emptyState, normalizeWallState } from '../lib/state';
 import type {
+  LayoutTemplateFile,
+  PlaybackProgressFile,
   PlayerCommand,
   PlayerHealth,
   ServerMessage,
   SourceLibrary,
   WallState,
+  WallPresetFile,
 } from '../lib/types';
+import { normalizePlaybackProgress } from '../lib/playback';
+import { normalizeLayoutTemplates } from '../lib/layouts';
+import { normalizeWallPresets } from '../lib/walls';
 
 const channelName = 'livewall-sync-v1';
 
@@ -17,6 +23,13 @@ export function useWall() {
   const [lastCommand, setLastCommand] = useState<PlayerCommand>();
   const [healthByTile, setHealthByTile] = useState<Record<string, PlayerHealth>>({});
   const [stateError, setStateError] = useState('');
+  const [progress, setProgress] = useState<PlaybackProgressFile>(() =>
+    normalizePlaybackProgress(undefined),
+  );
+  const [templates, setTemplates] = useState<LayoutTemplateFile>(() =>
+    normalizeLayoutTemplates(undefined),
+  );
+  const [presets, setPresets] = useState<WallPresetFile>(() => normalizeWallPresets(undefined));
   const channel = useRef<BroadcastChannel | undefined>(undefined);
   const acceptState = useCallback((next: unknown) => {
     try {
@@ -60,6 +73,18 @@ export function useWall() {
             error instanceof Error ? error.message : 'Saved wall data could not be loaded.',
           ),
       );
+    void Promise.all([
+      fetch('/api/playback-progress').then((response) => response.json()),
+      fetch('/api/layout-templates').then((response) => response.json()),
+      fetch('/api/wall-presets').then((response) => response.json()),
+    ])
+      .then(([nextProgress, nextTemplates, nextPresets]) => {
+        if (!active) return;
+        setProgress(normalizePlaybackProgress(nextProgress));
+        setTemplates(normalizeLayoutTemplates(nextTemplates));
+        setPresets(normalizeWallPresets(nextPresets));
+      })
+      .catch(() => active && setStateError('P3 workspace data could not be loaded safely.'));
 
     let socket: WebSocket;
     let retry: number;
@@ -188,17 +213,52 @@ export function useWall() {
     });
   }, []);
 
-  const reportResumePosition = useCallback(
-    async (tileId: string, sourceUrl: string, position: number) => {
-      const response = await fetch('/api/resume-position', {
-        method: 'POST',
+  const reportPlaybackProgress = useCallback(
+    async (sourceUrl: string, position: number, duration?: number, playlistIndex?: number) => {
+      const response = await fetch('/api/playback-progress', {
+        method: 'PUT',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ tileId, sourceUrl, position }),
+        body: JSON.stringify({ sourceUrl, position, duration, playlistIndex }),
       });
-      if (response.ok) acceptState(await response.json());
+      if (response.ok) setProgress(normalizePlaybackProgress(await response.json()));
     },
-    [acceptState],
+    [],
   );
+
+  const clearPlaybackProgress = useCallback(async (sourceUrl: string) => {
+    const response = await fetch(
+      `/api/playback-progress?sourceUrl=${encodeURIComponent(sourceUrl)}`,
+      {
+        method: 'DELETE',
+      },
+    );
+    if (!response.ok) throw new Error('Saved playback position could not be cleared.');
+    setProgress(normalizePlaybackProgress(await response.json()));
+  }, []);
+
+  const saveTemplates = useCallback(async (next: LayoutTemplateFile) => {
+    const response = await fetch('/api/layout-templates', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(next),
+    });
+    if (!response.ok) throw new Error('Layout templates could not be saved.');
+    const normalized = normalizeLayoutTemplates(await response.json());
+    setTemplates(normalized);
+    return normalized;
+  }, []);
+
+  const savePresets = useCallback(async (next: WallPresetFile) => {
+    const response = await fetch('/api/wall-presets', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(next),
+    });
+    if (!response.ok) throw new Error('Wall presets could not be saved.');
+    const normalized = normalizeWallPresets(await response.json());
+    setPresets(normalized);
+    return normalized;
+  }, []);
 
   return {
     state,
@@ -208,7 +268,13 @@ export function useWall() {
     lastCommand,
     healthByTile,
     reportHealth,
-    reportResumePosition,
+    progress,
+    templates,
+    presets,
+    reportPlaybackProgress,
+    clearPlaybackProgress,
+    saveTemplates,
+    savePresets,
     stateError,
     saveLibrary,
     importLibrary,

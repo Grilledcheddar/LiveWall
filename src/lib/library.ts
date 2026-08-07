@@ -1,10 +1,12 @@
 import { canonicalSourceUrl, detectSource } from './sources.js';
+import { normalizePlaybackStart } from './playback.js';
 import type {
   LibraryImportFile,
   LibrarySource,
   SourceFolder,
   SourceLibrary,
   VideoSource,
+  PlaybackStart,
 } from './types.js';
 
 export const MAX_RECENT_SOURCES = 50;
@@ -103,6 +105,7 @@ export function normalizeSourceLibrary(value: unknown, now = Date.now()): Source
         candidate.useCount > 0
           ? candidate.useCount
           : 1,
+      playback: normalizePlaybackStart(candidate.playback, parsed.source),
     };
     if (!existing || entry.updatedAt >= existing.updatedAt)
       byCanonical.set(entry.canonicalUrl, entry);
@@ -127,6 +130,7 @@ export function recordLibraryUse(
   title: string,
   titleMode: 'auto' | 'manual' = 'manual',
   now = Date.now(),
+  playback?: PlaybackStart,
 ): SourceLibrary {
   const normalized = normalizeSourceLibrary(library, now);
   const canonicalUrl = canonicalSourceUrl(source);
@@ -142,6 +146,7 @@ export function recordLibraryUse(
         updatedAt: now,
         lastUsedAt: now,
         useCount: existing.useCount + 1,
+        playback: normalizePlaybackStart(playback ?? existing.playback, source),
       }
     : {
         id: id(),
@@ -158,6 +163,7 @@ export function recordLibraryUse(
         updatedAt: now,
         lastUsedAt: now,
         useCount: 1,
+        playback: normalizePlaybackStart(playback, source),
       };
   return normalizeSourceLibrary(
     {
@@ -174,6 +180,7 @@ export function saveLibrarySource(
   title: string,
   titleMode: 'auto' | 'manual' = 'manual',
   now = Date.now(),
+  playback?: PlaybackStart,
 ): SourceLibrary {
   const normalized = normalizeSourceLibrary(library, now);
   const canonicalUrl = canonicalSourceUrl(source);
@@ -187,6 +194,7 @@ export function saveLibrarySource(
         titleMode: titleMode === 'auto' && source.type === 'youtube' ? 'auto' : 'manual',
         saved: true,
         updatedAt: now,
+        playback: normalizePlaybackStart(playback ?? existing.playback, source),
       }
     : {
         id: id(),
@@ -203,6 +211,7 @@ export function saveLibrarySource(
         updatedAt: now,
         lastUsedAt: now,
         useCount: 1,
+        playback: normalizePlaybackStart(playback, source),
       };
   return normalizeSourceLibrary(
     {

@@ -52,6 +52,27 @@ describe('Source Library', () => {
     expect(library.entries[0].useCount).toBe(4);
   });
 
+  it('deduplicates playlists by canonical playlist identity and preserves playback behavior', () => {
+    const id = 'PL1234567890abcdef';
+    const urls = [
+      `https://youtube.com/playlist?list=${id}`,
+      `https://youtube.com/watch?v=dQw4w9WgXcQ&list=${id}&index=4`,
+    ];
+    const library = urls.reduce(
+      (current, url, index) =>
+        recordLibraryUse(current, detectSource(url), 'Playlist', 'manual', index + 1, {
+          behavior: 'resume',
+        }),
+      emptyLibrary(),
+    );
+    expect(library.entries).toHaveLength(1);
+    expect(library.entries[0]).toMatchObject({
+      canonicalUrl: `https://www.youtube.com/playlist?list=${id}`,
+      playback: { behavior: 'resume' },
+      source: { type: 'youtube-playlist', playlistId: id },
+    });
+  });
+
   it('keeps automatic Recents, explicit Save, and Favorite as separate operations', () => {
     const source = mock('separate');
     let library = recordLibraryUse(emptyLibrary(), source, 'Separate', 'manual', 1);

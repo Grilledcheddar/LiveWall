@@ -1,5 +1,14 @@
-import type { OverlayMode, Tile, VideoSource, WallAppearance, WallState } from './types.js';
+import type {
+  OverlayMode,
+  PlaybackStart,
+  Tile,
+  VideoSource,
+  WallAppearance,
+  WallState,
+} from './types.js';
 import { emptyLibrary, normalizeSourceLibrary, recordLibraryUse } from './library.js';
+import { normalizeLayoutSlots } from './layouts.js';
+import { defaultStartBehavior, normalizePlaybackStart } from './playback.js';
 
 export const DEFAULT_APPEARANCE: Readonly<WallAppearance> = Object.freeze({
   backgroundColor: '#020305',
@@ -11,6 +20,7 @@ export const DEFAULT_APPEARANCE: Readonly<WallAppearance> = Object.freeze({
 });
 
 export const emptyState = (): WallState => ({
+  schemaVersion: 3,
   version: 0,
   updatedAt: Date.now(),
   layoutMode: 'automatic',
@@ -70,6 +80,25 @@ export function newTile(
     muted: true,
     volume: 70,
     displayOrder: 0,
+    playback: defaultStartBehavior(source),
+  };
+}
+
+function normalizeVideoSource(value: unknown, label: string): VideoSource {
+  if (!isRecord(value) || typeof value.url !== 'string')
+    throw new Error(`${label} has an invalid source.`);
+  const type = String(value.type);
+  if (!['youtube', 'youtube-playlist', 'hls', 'website', 'mock'].includes(type))
+    throw new Error(`${label} has an unsupported source type.`);
+  if (type === 'youtube' && typeof value.youtubeId !== 'string')
+    throw new Error(`${label} is missing its YouTube video ID.`);
+  if (type === 'youtube-playlist' && typeof value.playlistId !== 'string')
+    throw new Error(`${label} is missing its YouTube playlist ID.`);
+  return {
+    url: value.url,
+    type: type as VideoSource['type'],
+    youtubeId: type === 'youtube' ? String(value.youtubeId) : undefined,
+    playlistId: type === 'youtube-playlist' ? String(value.playlistId) : undefined,
   };
 }
 
@@ -77,7 +106,7 @@ export function normalizeWallState(input: unknown): WallState {
   if (!isRecord(input) || !Array.isArray(input.tiles)) {
     throw new Error('Saved state has an invalid shape.');
   }
-  if (input.layoutMode !== 'automatic' && input.layoutMode !== 'freeform') {
+  if (!['automatic', 'freeform', 'template'].includes(String(input.layoutMode))) {
     throw new Error('Saved state has an invalid layout mode.');
   }
   const indexedTiles = input.tiles.map((candidate, index) => {
@@ -88,7 +117,9 @@ export function normalizeWallState(input: unknown): WallState {
       typeof candidate.id !== 'string' ||
       typeof candidate.name !== 'string' ||
       typeof candidate.source.url !== 'string' ||
-      !['youtube', 'hls', 'website', 'mock'].includes(String(candidate.source.type))
+      !['youtube', 'youtube-playlist', 'hls', 'website', 'mock'].includes(
+        String(candidate.source.type),
+      )
     ) {
       throw new Error(`Saved tile ${index + 1} is missing required playback fields.`);
     }
@@ -96,11 +127,21 @@ export function normalizeWallState(input: unknown): WallState {
       typeof candidate.displayOrder === 'number' && Number.isFinite(candidate.displayOrder)
         ? candidate.displayOrder
         : index;
+    const source = normalizeVideoSource(candidate.source, `Saved tile ${index + 1}`);
+    const queuedSource = candidate.queuedSource
+      ? normalizeVideoSource(candidate.queuedSource, `Saved tile ${index + 1} queue`)
+      : undefined;
     return {
       index,
       requestedOrder,
       tile: {
         ...candidate,
+        source,
+        queuedSource,
+        queuedPlayback: queuedSource
+          ? normalizePlaybackStart(candidate.queuedPlayback, queuedSource)
+          : undefined,
+        playback: normalizePlaybackStart(candidate.playback, source),
         titleMode: candidate.titleMode === 'auto' ? ('auto' as const) : ('manual' as const),
         displayOrder: requestedOrder,
         resumePosition:
@@ -124,13 +165,20 @@ export function normalizeWallState(input: unknown): WallState {
   const tileIds = new Set(tiles.map((tile) => tile.id));
   return {
     ...input,
+    schemaVersion: 3,
     version:
       typeof input.version === 'number' && Number.isFinite(input.version) ? input.version : 0,
     updatedAt:
       typeof input.updatedAt === 'number' && Number.isFinite(input.updatedAt)
         ? input.updatedAt
         : Date.now(),
-    layoutMode: input.layoutMode,
+    layoutMode: input.layoutMode as WallState['layoutMode'],
+    activeLayoutId:
+      input.layoutMode === 'template' && typeof input.activeLayoutId === 'string'
+        ? input.activeLayoutId
+        : undefined,
+    layoutSlots:
+      input.layoutMode === 'template' ? normalizeLayoutSlots(input.layoutSlots, 12, 12) : undefined,
     tiles,
     activeAudioTileId:
       typeof input.activeAudioTileId === 'string' && tileIds.has(input.activeAudioTileId)
@@ -190,7 +238,7 @@ export function reorderTile(state: WallState, tileId: string, beforeTileId: stri
 export function replaceTileSource(
   state: WallState,
   tileId: string,
-  replacement: Pick<Tile, 'name' | 'source' | 'titleMode'>,
+  replacement: Pick<Tile, 'name' | 'source' | 'titleMode'> & { playback?: PlaybackStart },
 ): WallState {
   return {
     ...state,
@@ -202,6 +250,8 @@ export function replaceTileSource(
             source: replacement.source,
             titleMode: replacement.titleMode,
             resumePosition: undefined,
+            playback: normalizePlaybackStart(replacement.playback, replacement.source),
+            playlistIndex: undefined,
           }
         : tile,
     ),
@@ -232,8 +282,11 @@ export function reconcileTimers(state: WallState, now = Date.now()): WallState {
       return {
         ...tile,
         source: tile.queuedSource,
+        playback: normalizePlaybackStart(tile.queuedPlayback, tile.queuedSource),
         queuedSource: undefined,
+        queuedPlayback: undefined,
         scheduledAt: undefined,
+        playlistIndex: undefined,
       };
     }
     return tile;
@@ -280,6 +333,7 @@ export function queueSourceForTile(
   titleMode: Tile['titleMode'] = 'manual',
   replaceExisting = false,
   now = Date.now(),
+  playback?: PlaybackStart,
 ): WallState {
   const tile = state.tiles.find((candidate) => candidate.id === tileId);
   if (!tile || (tile.queuedSource && !replaceExisting)) return state;
@@ -288,7 +342,12 @@ export function queueSourceForTile(
     ...recorded,
     tiles: recorded.tiles.map((candidate) =>
       candidate.id === tileId
-        ? { ...candidate, queuedSource: source, scheduledAt: undefined }
+        ? {
+            ...candidate,
+            queuedSource: source,
+            queuedPlayback: normalizePlaybackStart(playback, source),
+            scheduledAt: undefined,
+          }
         : candidate,
     ),
   };
@@ -311,7 +370,9 @@ export function playNextSource(state: WallState, tileId: string, now = Date.now(
         ? {
             ...candidate,
             source: candidate.queuedSource!,
+            playback: normalizePlaybackStart(candidate.queuedPlayback, candidate.queuedSource!),
             queuedSource: undefined,
+            queuedPlayback: undefined,
             scheduledAt: undefined,
             resumePosition: undefined,
           }

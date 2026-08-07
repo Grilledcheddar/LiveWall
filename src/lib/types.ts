@@ -1,9 +1,16 @@
-export type SourceType = 'youtube' | 'hls' | 'website' | 'mock';
+export type SourceType = 'youtube' | 'youtube-playlist' | 'hls' | 'website' | 'mock';
+export type StartBehavior = 'live' | 'resume' | 'specific' | 'beginning';
+
+export interface PlaybackStart {
+  behavior: StartBehavior;
+  specificTime?: number;
+}
 
 export interface VideoSource {
   url: string;
   type: SourceType;
   youtubeId?: string;
+  playlistId?: string;
 }
 
 export interface Tile {
@@ -12,6 +19,7 @@ export interface Tile {
   titleMode?: 'auto' | 'manual';
   source: VideoSource;
   queuedSource?: VideoSource;
+  queuedPlayback?: PlaybackStart;
   scheduledAt?: number;
   x: number;
   y: number;
@@ -21,6 +29,8 @@ export interface Tile {
   volume: number;
   displayOrder: number;
   resumePosition?: number;
+  playback?: PlaybackStart;
+  playlistIndex?: number;
 }
 
 export type OverlayMode = 'off' | 'hover' | 'always';
@@ -61,6 +71,7 @@ export interface LibrarySource {
   updatedAt: number;
   lastUsedAt: number;
   useCount: number;
+  playback?: PlaybackStart;
 }
 
 export interface SourceFolder {
@@ -94,12 +105,78 @@ export interface PlayerHealth {
   technicalDetail?: string;
   retryAttempt?: number;
   nextRetryAt?: number;
+  isLive?: boolean;
+  atLiveEdge?: boolean;
+  position?: number;
+  duration?: number;
+  playlistIndex?: number;
+  playlistLength?: number;
+  currentTitle?: string;
+  upNextTitle?: string;
+  warning?: string;
+}
+
+export interface LayoutSlot {
+  id: string;
+  column: number;
+  row: number;
+  columnSpan: number;
+  rowSpan: number;
+}
+
+export interface LayoutTemplate {
+  id: string;
+  name: string;
+  builtIn: boolean;
+  columns: number;
+  rows: number;
+  slots: LayoutSlot[];
+  appearance?: Partial<WallAppearance>;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface LayoutTemplateFile {
+  format: 'livewall-layout-templates';
+  version: 1;
+  templates: LayoutTemplate[];
+}
+
+export interface PlaybackProgress {
+  key: string;
+  position: number;
+  duration?: number;
+  playlistIndex?: number;
+  updatedAt: number;
+}
+
+export interface PlaybackProgressFile {
+  format: 'livewall-playback-progress';
+  version: 1;
+  entries: PlaybackProgress[];
+}
+
+export interface WallPreset {
+  id: string;
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+  state: WallState;
+}
+
+export interface WallPresetFile {
+  format: 'livewall-wall-presets';
+  version: 1;
+  presets: WallPreset[];
 }
 
 export interface WallState {
+  schemaVersion: 3;
   version: number;
   updatedAt: number;
-  layoutMode: 'automatic' | 'freeform';
+  layoutMode: 'automatic' | 'freeform' | 'template';
+  activeLayoutId?: string;
+  layoutSlots?: LayoutSlot[];
   tiles: Tile[];
   activeAudioTileId?: string;
   globallyStopped: boolean;
@@ -110,7 +187,19 @@ export interface WallState {
 }
 
 export type PlayerCommandName =
-  'play' | 'pause' | 'seek' | 'mute' | 'unmute' | 'volume' | 'stop' | 'resume' | 'retry';
+  | 'play'
+  | 'pause'
+  | 'seek'
+  | 'mute'
+  | 'unmute'
+  | 'volume'
+  | 'stop'
+  | 'resume'
+  | 'retry'
+  | 'go-live'
+  | 'restart'
+  | 'previous'
+  | 'next';
 
 export interface PlayerCommand {
   id: string;

@@ -9,10 +9,19 @@ import {
   normalizeOverlayMode,
   orderedTiles,
 } from '../lib/state';
+import { playbackKey } from '../lib/playback';
 
 export function WallPage() {
-  const { state, save, connected, lastCommand, reportHealth, reportResumePosition, stateError } =
-    useWall();
+  const {
+    state,
+    save,
+    connected,
+    lastCommand,
+    reportHealth,
+    reportPlaybackProgress,
+    progress,
+    stateError,
+  } = useWall();
   const tiles = useMemo(() => orderedTiles(state.tiles), [state.tiles]);
   const appearance = normalizeAppearance(state.appearance);
   const overlayMode = normalizeOverlayMode(state.overlayMode);
@@ -147,7 +156,10 @@ export function WallPage() {
                 focused={state.focusedTileId === tile.id}
                 activeAudio={state.activeAudioTileId === tile.id}
                 onHealth={reportHealth}
-                onResumePosition={reportResumePosition}
+                progress={progress?.entries?.find(
+                  (entry) => entry.key === playbackKey(tile.source),
+                )}
+                onPlaybackProgress={reportPlaybackProgress}
               />
               <button
                 className="tile-focus-button"
@@ -189,7 +201,10 @@ export function WallPage() {
                 focused={state.focusedTileId === tile.id}
                 activeAudio={state.activeAudioTileId === tile.id}
                 onHealth={reportHealth}
-                onResumePosition={reportResumePosition}
+                progress={progress?.entries?.find(
+                  (entry) => entry.key === playbackKey(tile.source),
+                )}
+                onPlaybackProgress={reportPlaybackProgress}
               />
               <button
                 className="tile-focus-button"
