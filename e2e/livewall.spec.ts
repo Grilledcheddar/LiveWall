@@ -750,6 +750,34 @@ test('P3 layout previews, custom templates, and named walls preserve live player
   const admin = await context.newPage();
   const wall = await context.newPage();
   await Promise.all([admin.goto('/admin'), wall.goto('/wall')]);
+  const p3ControlStyles = await admin.locator('.p3-workspace').evaluate((workspace) => {
+    const luminance = (value: string) => {
+      const channels = (value.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number);
+      const [red, green, blue] = channels.map((channel) => {
+        const normalized = channel / 255;
+        return normalized <= 0.03928 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+    };
+    return [...workspace.querySelectorAll('button, select, input')].map((control) => {
+      const style = getComputedStyle(control);
+      const lighter = Math.max(luminance(style.color), luminance(style.backgroundColor));
+      const darker = Math.min(luminance(style.color), luminance(style.backgroundColor));
+      return {
+        label: control.textContent?.trim() || control.getAttribute('aria-label'),
+        background: style.backgroundColor,
+        border: style.borderColor,
+        cursor: style.cursor,
+        contrast: (lighter + 0.05) / (darker + 0.05),
+      };
+    });
+  });
+  for (const control of p3ControlStyles) {
+    expect(control.background, control.label).not.toBe('rgb(240, 240, 240)');
+    expect(control.background, control.label).not.toBe('rgb(255, 255, 255)');
+    expect(control.contrast, control.label).toBeGreaterThanOrEqual(4.5);
+    expect(control.border, control.label).not.toBe('rgb(0, 0, 0)');
+  }
   const instances = await wall
     .locator('.mock-player')
     .evaluateAll((players) => players.map((player) => player.getAttribute('data-instance-id')));

@@ -2050,6 +2050,105 @@ a {
   color: var(--lime);
   border-bottom: 1px solid #c8ff3d66;
 }
+
+/* P3 controls own their complete runtime state; native light-theme defaults must not leak in. */
+.p3-workspace,
+.p3-dialog {
+  color-scheme: dark;
+}
+.p3-workspace button,
+.p3-workspace select,
+.p3-workspace input,
+.p3-dialog button,
+.p3-dialog select,
+.p3-dialog input {
+  min-height: 36px;
+  padding: 7px 10px;
+  color: #f1f5fa;
+  border: 1px solid #7188a2;
+  border-radius: 7px;
+  background-color: #1b2632;
+  box-shadow: 0 1px 0 #ffffff0a inset;
+  opacity: 1;
+}
+.p3-workspace button,
+.p3-workspace select,
+.p3-dialog button,
+.p3-dialog select {
+  cursor: pointer;
+}
+.p3-workspace input,
+.p3-dialog input {
+  cursor: text;
+}
+.p3-workspace button:not(:disabled):not([aria-disabled='true']):hover,
+.p3-workspace select:not(:disabled):not([aria-disabled='true']):hover,
+.p3-workspace input:not(:disabled):not([aria-disabled='true']):hover,
+.p3-dialog button:not(:disabled):not([aria-disabled='true']):hover,
+.p3-dialog select:not(:disabled):not([aria-disabled='true']):hover,
+.p3-dialog input:not(:disabled):not([aria-disabled='true']):hover {
+  color: #ffffff;
+  border-color: #b7c9dc;
+  background-color: #2a3a4d;
+  filter: none;
+}
+.p3-workspace button:focus-visible,
+.p3-workspace select:focus-visible,
+.p3-workspace input:focus-visible,
+.p3-dialog button:focus-visible,
+.p3-dialog select:focus-visible,
+.p3-dialog input:focus-visible {
+  outline: 3px solid #c8ff3d;
+  outline-offset: 2px;
+  border-color: #c8ff3d;
+  box-shadow: 0 0 0 1px #0b0e12;
+}
+.p3-workspace button:disabled,
+.p3-workspace button[aria-disabled='true'],
+.p3-workspace select:disabled,
+.p3-workspace select[aria-disabled='true'],
+.p3-workspace input:disabled,
+.p3-workspace input[aria-disabled='true'],
+.p3-dialog button:disabled,
+.p3-dialog button[aria-disabled='true'],
+.p3-dialog select:disabled,
+.p3-dialog select[aria-disabled='true'],
+.p3-dialog input:disabled,
+.p3-dialog input[aria-disabled='true'] {
+  color: #9ba5b2 !important;
+  border-color: #434c59 !important;
+  background-color: #171c23 !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  cursor: not-allowed !important;
+  opacity: 1 !important;
+}
+.p3-workspace select,
+.p3-dialog select {
+  padding-right: 34px;
+  appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, #dce5ef 50%),
+    linear-gradient(135deg, #dce5ef 50%, transparent 50%);
+  background-position:
+    calc(100% - 15px) 50%,
+    calc(100% - 10px) 50%;
+  background-repeat: no-repeat;
+  background-size:
+    5px 5px,
+    5px 5px;
+}
+.p3-workspace select option,
+.p3-dialog select option {
+  color: #f1f5fa;
+  background: #111820;
+}
+.p3-workspace .workspace-tabs button[aria-selected='true'] {
+  color: #0b100d;
+  border-color: var(--lime);
+  background-color: var(--lime);
+  cursor: pointer;
+}
 @media (max-width: 560px) {
   .open-wall-group {
     display: none;
