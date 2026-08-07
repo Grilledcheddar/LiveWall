@@ -212,12 +212,12 @@ export function SourceLibraryPanel({
           <p>Save channels, live cameras, HLS feeds, and best-effort websites for reuse.</p>
         </div>
         <div className="library-file-actions">
-          <a className="secondary" href="/api/library/export" download>
+          <a className="library-action" href="/api/library/export" download>
             Export
           </a>
           <button
             ref={importTrigger}
-            className="secondary"
+            className="library-action"
             onClick={() => importInput.current?.click()}
           >
             Import

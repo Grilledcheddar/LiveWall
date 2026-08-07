@@ -251,6 +251,225 @@ test('Save Source dialog and disabled controls remain usable at reduced viewport
   await context.close();
 });
 
+test('production Source Library controls have distinct enabled, hover, focus, and disabled styles', async ({
+  browser,
+  request,
+}, testInfo) => {
+  const now = Date.now();
+  await request.put('/api/state', {
+    data: {
+      version: 0,
+      updatedAt: now,
+      layoutMode: 'automatic',
+      tiles: [
+        {
+          id: 'style-tile',
+          name: 'Style Camera',
+          titleMode: 'manual',
+          source: { type: 'mock', url: 'https://mock.livewall.local/?label=style-camera' },
+          x: 0,
+          y: 0,
+          w: 4,
+          h: 4,
+          muted: true,
+          volume: 70,
+          displayOrder: 0,
+        },
+      ],
+      library: {
+        version: 1,
+        folders: [
+          {
+            id: 'style-folder',
+            name: 'Cameras',
+            displayOrder: 0,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+        entries: [
+          {
+            id: 'style-saved',
+            originalUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+            canonicalUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+            source: {
+              type: 'youtube',
+              url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+              youtubeId: 'dQw4w9WgXcQ',
+            },
+            title: 'Saved Camera',
+            titleMode: 'auto',
+            saved: true,
+            favorite: false,
+            recent: true,
+            folderId: 'style-folder',
+            createdAt: now,
+            updatedAt: now,
+            lastUsedAt: now,
+            useCount: 1,
+          },
+          {
+            id: 'style-recent',
+            originalUrl: 'https://example.com/live-camera',
+            canonicalUrl: 'https://example.com/live-camera',
+            source: { type: 'website', url: 'https://example.com/live-camera' },
+            title: 'Recent Camera',
+            titleMode: 'manual',
+            saved: false,
+            favorite: false,
+            recent: true,
+            createdAt: now,
+            updatedAt: now,
+            lastUsedAt: now,
+            useCount: 1,
+          },
+        ],
+      },
+    },
+  });
+
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const admin = await context.newPage();
+  await admin.goto('/admin');
+  const library = admin.locator('.source-library');
+  const newFolder = library.getByRole('button', { name: 'New folder' });
+  const clearRecents = library.getByRole('button', { name: 'Clear Recents' });
+  const folderSelector = library
+    .locator('.library-source-row')
+    .filter({ hasText: 'Saved Camera' })
+    .getByLabel('Folder');
+  const disabledSave = library.getByRole('button', { name: 'Saved to Library' });
+
+  for (const control of [newFolder, clearRecents, folderSelector])
+    await expect(control).toBeEnabled();
+  await expect(disabledSave).toBeDisabled();
+
+  const readStyle = async (control: typeof newFolder) =>
+    control.evaluate((element) => {
+      const style = getComputedStyle(element);
+      const channels = (value: string) => (value.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number);
+      const luminance = (value: string) => {
+        const [red, green, blue] = channels(value).map((channel) => {
+          const normalized = channel / 255;
+          return normalized <= 0.03928 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+        });
+        return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+      };
+      const contrast = (first: string, second: string) => {
+        const lighter = Math.max(luminance(first), luminance(second));
+        const darker = Math.min(luminance(first), luminance(second));
+        return (lighter + 0.05) / (darker + 0.05);
+      };
+      return {
+        background: style.backgroundColor,
+        backgroundImage: style.backgroundImage,
+        border: style.borderColor,
+        color: style.color,
+        cursor: style.cursor,
+        opacity: style.opacity,
+        outline: style.outlineStyle,
+        outlineColor: style.outlineColor,
+        textContrast: contrast(style.color, style.backgroundColor),
+        borderContrast: contrast(style.borderColor, style.backgroundColor),
+      };
+    });
+
+  const enabled = await readStyle(newFolder);
+  const enabledSelect = await readStyle(folderSelector);
+  const disabled = await readStyle(disabledSave);
+  expect(enabled.textContrast).toBeGreaterThanOrEqual(4.5);
+  expect(enabled.borderContrast).toBeGreaterThanOrEqual(3);
+  expect(enabled.cursor).toBe('pointer');
+  expect(enabled.opacity).toBe('1');
+  expect(enabled.background).not.toBe('rgb(240, 240, 240)');
+  expect(enabledSelect.textContrast).toBeGreaterThanOrEqual(4.5);
+  expect(enabledSelect.backgroundImage).not.toBe('none');
+  expect(enabledSelect.cursor).toBe('pointer');
+  expect(enabledSelect.background).not.toBe(disabled.background);
+  expect(enabledSelect.color).not.toBe(disabled.color);
+  expect(enabledSelect.border).not.toBe(disabled.border);
+
+  const filterSelects = library.locator('.library-controls select');
+  await expect(filterSelects).toHaveCount(5);
+  for (const [index, label] of ['Show', 'Type', 'Folder', 'Sort', 'Target tile'].entries()) {
+    const select = filterSelects.nth(index);
+    await expect(select).toBeEnabled();
+    const selectStyle = await readStyle(select);
+    expect(selectStyle.textContrast, label).toBeGreaterThanOrEqual(4.5);
+    expect(selectStyle.backgroundImage, label).not.toBe('none');
+  }
+  const optionStyle = await folderSelector
+    .locator('option')
+    .first()
+    .evaluate((option) => {
+      const style = getComputedStyle(option);
+      return { color: style.color, background: style.backgroundColor };
+    });
+  expect(optionStyle.color).toBe('rgb(241, 245, 250)');
+  expect(optionStyle.background).toBe('rgb(17, 24, 32)');
+
+  const base = await readStyle(newFolder);
+  await newFolder.hover();
+  const hovered = await readStyle(newFolder);
+  expect(hovered.background).not.toBe(base.background);
+  expect(hovered.border).not.toBe(base.border);
+  await newFolder.focus();
+  const focused = await readStyle(newFolder);
+  expect(focused.outline).not.toBe('none');
+  expect(focused.outlineColor).toBe('rgb(200, 255, 61)');
+
+  for (const name of [
+    'Edit name',
+    'Refresh title',
+    'Add as Tile',
+    'Replace Tile',
+    'Queue for Tile',
+    'Copy URL',
+    'Import',
+    'Export',
+    'Save to Library',
+  ]) {
+    const role = name === 'Export' ? 'link' : 'button';
+    const control = library.getByRole(role, { name }).first();
+    await expect(control, name).toBeEnabled();
+    expect((await readStyle(control)).textContrast, name).toBeGreaterThanOrEqual(4.5);
+  }
+  const openExternally = library.getByRole('link', { name: 'Open Externally' }).first();
+  await expect(openExternally).toBeEnabled();
+  expect((await readStyle(openExternally)).textContrast).toBeGreaterThanOrEqual(4.5);
+
+  let folderPrompt = '';
+  admin.once('dialog', async (dialog) => {
+    folderPrompt = dialog.message();
+    await dialog.dismiss();
+  });
+  await newFolder.click();
+  expect(folderPrompt).toContain('Folder name');
+
+  const tileSave = admin
+    .locator('[data-testid="admin-tile"]')
+    .getByRole('button', { name: 'Save to Library' });
+  await tileSave.click();
+  const cancel = admin.getByRole('button', { name: 'Cancel' });
+  const save = admin.getByRole('button', { name: 'Save Source', exact: true });
+  await expect(cancel).toBeEnabled();
+  await expect(save).toBeEnabled();
+  expect((await readStyle(cancel)).textContrast).toBeGreaterThanOrEqual(4.5);
+  expect((await readStyle(save)).textContrast).toBeGreaterThanOrEqual(4.5);
+  await cancel.click();
+
+  const productionStylesheet = await admin.evaluate(() =>
+    [...document.styleSheets].some(
+      (sheet) =>
+        sheet.href?.includes('/assets/') &&
+        [...sheet.cssRules].some((rule) => rule.cssText.includes('.source-library select')),
+    ),
+  );
+  expect(productionStylesheet).toBe(true);
+  await library.screenshot({ path: testInfo.outputPath('source-library-controls.png') });
+  await context.close();
+});
+
 test('Admin controls the open Wall and state survives reload', async ({ browser, request }) => {
   await request.put('/api/state', {
     data: { version: 0, updatedAt: Date.now(), layoutMode: 'automatic', tiles: [] },
