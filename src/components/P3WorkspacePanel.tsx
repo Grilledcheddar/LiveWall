@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useState } from 'react';
 import { Copy, Pencil, Search, Trash2, X } from 'lucide-react';
+import { Button } from './Button';
 import {
   applyLayoutTemplate,
   BUILT_IN_LAYOUTS,
@@ -113,9 +114,14 @@ function Modal({
       >
         <header className="dialog-heading">
           <h2 id={titleId}>{title}</h2>
-          <button className="icon-button" onClick={close} aria-label={`Close ${title}`}>
+          <Button
+            variant="ghost"
+            className="icon-button"
+            onClick={close}
+            aria-label={`Close ${title}`}
+          >
             <X />
-          </button>
+          </Button>
         </header>
         {children}
       </section>
@@ -238,18 +244,20 @@ function LayoutBuilder({
                   />
                 </label>
               ))}
-              <button
+              <Button
+                variant="destructive"
                 type="button"
                 disabled={slots.length === 1}
                 onClick={() => changeSlots(slots.filter((item) => item.id !== slot.id))}
               >
                 Remove
-              </button>
+              </Button>
             </fieldset>
           ))}
         </div>
         <div className="builder-tools">
-          <button
+          <Button
+            variant="secondary"
             type="button"
             disabled={slots.length >= 9}
             onClick={() =>
@@ -260,8 +268,9 @@ function LayoutBuilder({
             }
           >
             Add slot
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="secondary"
             type="button"
             disabled={!history.length}
             onClick={() => {
@@ -271,13 +280,13 @@ function LayoutBuilder({
             }}
           >
             Undo
-          </button>
-          <button type="button" onClick={() => changeSlots(blankSlots())}>
+          </Button>
+          <Button variant="ghost" type="button" onClick={() => changeSlots(blankSlots())}>
             Reset
-          </button>
-          <button type="button" onClick={() => setPreview(!preview)}>
+          </Button>
+          <Button variant="secondary" type="button" onClick={() => setPreview(!preview)}>
             {preview ? 'Hide Preview' : 'Preview'}
-          </button>
+          </Button>
         </div>
         {preview && (
           <div className="builder-preview-callout">
@@ -294,7 +303,8 @@ function LayoutBuilder({
         )}
       </div>
       <footer className="dialog-actions">
-        <button
+        <Button
+          variant="secondary"
           type="button"
           className="secondary"
           onClick={() => {
@@ -302,10 +312,10 @@ function LayoutBuilder({
           }}
         >
           Cancel
-        </button>
-        <button disabled={!valid} onClick={() => void onSave(draft)}>
+        </Button>
+        <Button variant="primary" disabled={!valid} onClick={() => void onSave(draft)}>
           Save Template
-        </button>
+        </Button>
       </footer>
     </Modal>
   );
@@ -376,12 +386,22 @@ export function P3WorkspacePanel({
   return (
     <section className="p3-workspace" aria-label="Walls and Layouts">
       <div className="workspace-tabs" role="tablist">
-        <button role="tab" aria-selected={tab === 'walls'} onClick={() => setTab('walls')}>
+        <Button
+          variant="ghost"
+          role="tab"
+          aria-selected={tab === 'walls'}
+          onClick={() => setTab('walls')}
+        >
           Named Walls
-        </button>
-        <button role="tab" aria-selected={tab === 'layouts'} onClick={() => setTab('layouts')}>
+        </Button>
+        <Button
+          variant="ghost"
+          role="tab"
+          aria-selected={tab === 'layouts'}
+          onClick={() => setTab('layouts')}
+        >
           Layouts
-        </button>
+        </Button>
       </div>
       {tab === 'walls' ? (
         <div className="workspace-panel">
@@ -391,14 +411,15 @@ export function P3WorkspacePanel({
               <h2>Named Walls</h2>
               <p>Presets change only when you explicitly update them.</p>
             </div>
-            <button
+            <Button
+              variant="primary"
               onClick={(event) => {
                 setReturnFocus(event.currentTarget);
                 void saveCurrent();
               }}
             >
               Save Current Wall
-            </button>
+            </Button>
           </div>
           {loadedPreset && (
             <div className={`workspace-state ${modified?.modified ? 'modified' : ''}`}>
@@ -409,7 +430,8 @@ export function P3WorkspacePanel({
                   : 'Matches saved preset'}
               </span>
               <div>
-                <button
+                <Button
+                  variant="primary"
                   disabled={!modified?.modified}
                   onClick={() =>
                     void savePresets(updateWallPreset(presets, loadedPreset.id, state)).then(() =>
@@ -418,10 +440,13 @@ export function P3WorkspacePanel({
                   }
                 >
                   Update Preset
-                </button>
-                <button onClick={() => void saveCurrent(`${loadedPreset.name} copy`)}>
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => void saveCurrent(`${loadedPreset.name} copy`)}
+                >
                   Save As
-                </button>
+                </Button>
               </div>
             </div>
           )}
@@ -475,7 +500,8 @@ export function P3WorkspacePanel({
                     </small>
                   </div>
                   <div className="card-actions">
-                    <button
+                    <Button
+                      variant="secondary"
                       onClick={(event) => {
                         if (!warnModified()) return;
                         setReturnFocus(event.currentTarget);
@@ -483,8 +509,9 @@ export function P3WorkspacePanel({
                       }}
                     >
                       Preview
-                    </button>
-                    <button
+                    </Button>
+                    <Button
+                      variant="ghost"
                       aria-label={`Rename ${preset.name}`}
                       onClick={() => {
                         const name = prompt('Rename wall', preset.name);
@@ -492,8 +519,9 @@ export function P3WorkspacePanel({
                       }}
                     >
                       <Pencil />
-                    </button>
-                    <button
+                    </Button>
+                    <Button
+                      variant="ghost"
                       aria-label={`Duplicate ${preset.name}`}
                       onClick={() => {
                         const name = prompt('Duplicate wall as', `${preset.name} copy`);
@@ -501,8 +529,9 @@ export function P3WorkspacePanel({
                       }}
                     >
                       <Copy />
-                    </button>
-                    <button
+                    </Button>
+                    <Button
+                      variant="destructive"
                       aria-label={`Delete ${preset.name}`}
                       onClick={() =>
                         confirm(`Delete '${preset.name}'?`) &&
@@ -510,7 +539,7 @@ export function P3WorkspacePanel({
                       }
                     >
                       <Trash2 />
-                    </button>
+                    </Button>
                   </div>
                 </article>
               ))}
@@ -528,7 +557,8 @@ export function P3WorkspacePanel({
                 players.
               </p>
             </div>
-            <button
+            <Button
+              variant="primary"
               onClick={(event) => {
                 setReturnFocus(event.currentTarget);
                 setBuilder(null);
@@ -536,7 +566,7 @@ export function P3WorkspacePanel({
               }}
             >
               New Custom Layout
-            </button>
+            </Button>
           </div>
           <div className="layout-cards">
             {allLayouts.map((template) => {
@@ -558,17 +588,19 @@ export function P3WorkspacePanel({
                     )}
                   </div>
                   <div className="card-actions">
-                    <button
+                    <Button
+                      variant="secondary"
                       onClick={(event) => {
                         setReturnFocus(event.currentTarget);
                         setLayoutPreview(template);
                       }}
                     >
                       Preview
-                    </button>
+                    </Button>
                     {!template.builtIn && (
                       <>
-                        <button
+                        <Button
+                          variant="ghost"
                           aria-label={`Edit ${template.name}`}
                           onClick={(event) => {
                             setReturnFocus(event.currentTarget);
@@ -577,8 +609,9 @@ export function P3WorkspacePanel({
                           }}
                         >
                           <Pencil />
-                        </button>
-                        <button
+                        </Button>
+                        <Button
+                          variant="ghost"
                           aria-label={`Duplicate ${template.name}`}
                           onClick={() => {
                             const copy = {
@@ -592,8 +625,9 @@ export function P3WorkspacePanel({
                           }}
                         >
                           <Copy />
-                        </button>
-                        <button
+                        </Button>
+                        <Button
+                          variant="destructive"
                           aria-label={`Delete ${template.name}`}
                           onClick={() =>
                             confirm(`Delete '${template.name}'?`) &&
@@ -608,7 +642,7 @@ export function P3WorkspacePanel({
                           }
                         >
                           <Trash2 />
-                        </button>
+                        </Button>
                       </>
                     )}
                   </div>
@@ -635,10 +669,11 @@ export function P3WorkspacePanel({
             )}
           </div>
           <footer className="dialog-actions">
-            <button className="secondary" onClick={() => setLayoutPreview(undefined)}>
+            <Button variant="secondary" onClick={() => setLayoutPreview(undefined)}>
               Cancel
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="primary"
               disabled={state.tiles.length > layoutPreview.slots.length}
               onClick={() =>
                 void saveState((current) => applyLayoutTemplate(current, layoutPreview)).then(
@@ -650,7 +685,7 @@ export function P3WorkspacePanel({
               }
             >
               Apply Layout
-            </button>
+            </Button>
           </footer>
         </Modal>
       )}
@@ -705,10 +740,11 @@ export function P3WorkspacePanel({
             )}
           </div>
           <footer className="dialog-actions">
-            <button className="secondary" onClick={() => setPresetPreviewId(undefined)}>
+            <Button variant="secondary" onClick={() => setPresetPreviewId(undefined)}>
               Cancel
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="secondary"
               onClick={() =>
                 void saveState((current) => layoutOnlyState(current, selectedPreset.state)).then(
                   () => {
@@ -719,8 +755,9 @@ export function P3WorkspacePanel({
               }
             >
               Apply Layout Only
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="destructive"
               disabled={selectedPreset.state.tiles.length > 9}
               onClick={() => {
                 if (!confirm(`Replace the current wall with '${selectedPreset.name}'?`)) return;
@@ -732,7 +769,7 @@ export function P3WorkspacePanel({
               }}
             >
               Replace Current Wall
-            </button>
+            </Button>
           </footer>
         </Modal>
       )}

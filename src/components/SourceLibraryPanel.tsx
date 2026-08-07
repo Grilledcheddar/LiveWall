@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Button } from './Button';
 import {
   clearLibraryRecents,
   createLibraryFolder,
@@ -234,13 +235,14 @@ export function SourceLibraryPanel({
           <a className="library-action" href="/api/library/export" download>
             Export
           </a>
-          <button
+          <Button
+            variant="secondary"
             ref={importTrigger}
             className="library-action"
             onClick={() => importInput.current?.click()}
           >
             Import
-          </button>
+          </Button>
           <input
             ref={importInput}
             type="file"
@@ -248,8 +250,11 @@ export function SourceLibraryPanel({
             hidden
             onChange={(event) => void loadImport(event.target.files?.[0])}
           />
-          <button onClick={() => void createFolder()}>New folder</button>
-          <button
+          <Button variant="primary" onClick={() => void createFolder()}>
+            New folder
+          </Button>
+          <Button
+            variant="secondary"
             disabled={!state.library.entries.some((entry) => entry.recent)}
             title={
               state.library.entries.some((entry) => entry.recent)
@@ -264,7 +269,7 @@ export function SourceLibraryPanel({
             }}
           >
             Clear Recents
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -272,22 +277,28 @@ export function SourceLibraryPanel({
         {state.library.folders.map((folder, index) => (
           <div key={folder.id}>
             <strong>{folder.name}</strong>
-            <button
+            <Button
+              variant="ghost"
               aria-label={`Move ${folder.name} up`}
               disabled={index === 0}
               onClick={() => void saveLibrary(moveLibraryFolder(state.library, folder.id, -1))}
             >
               ↑
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="ghost"
               aria-label={`Move ${folder.name} down`}
               disabled={index === state.library.folders.length - 1}
               onClick={() => void saveLibrary(moveLibraryFolder(state.library, folder.id, 1))}
             >
               ↓
-            </button>
-            <button onClick={() => void renameFolder(folder.id, folder.name)}>Rename</button>
-            <button onClick={() => void removeFolder(folder.id, folder.name)}>Delete</button>
+            </Button>
+            <Button variant="secondary" onClick={() => void renameFolder(folder.id, folder.name)}>
+              Rename
+            </Button>
+            <Button variant="destructive" onClick={() => void removeFolder(folder.id, folder.name)}>
+              Delete
+            </Button>
           </div>
         ))}
       </div>
@@ -370,7 +381,8 @@ export function SourceLibraryPanel({
             const folder = state.library.folders.find((item) => item.id === entry.folderId);
             return (
               <article className="library-source-row" key={entry.id} data-library-id={entry.id}>
-                <button
+                <Button
+                  variant="ghost"
                   className="favorite-star"
                   disabled={!entry.saved}
                   aria-label={
@@ -388,7 +400,7 @@ export function SourceLibraryPanel({
                   onClick={() => void favorite(entry)}
                 >
                   {entry.favorite ? '★ Favorited' : '☆ Add to favorites'}
-                </button>
+                </Button>
                 <div className="library-source-copy">
                   <strong>{entry.title}</strong>
                   <span className="library-entry-labels">
@@ -408,7 +420,8 @@ export function SourceLibraryPanel({
                 </div>
                 {entry.saved && (
                   <div className="library-metadata-actions">
-                    <button
+                    <Button
+                      variant="secondary"
                       onClick={() => {
                         const title = prompt('Saved source display name', entry.title);
                         if (title !== null)
@@ -416,9 +429,10 @@ export function SourceLibraryPanel({
                       }}
                     >
                       Edit name
-                    </button>
+                    </Button>
                     {entry.titleMode === 'auto' && entry.source.type === 'youtube' && (
-                      <button
+                      <Button
+                        variant="secondary"
                         onClick={async () => {
                           try {
                             const title = await resolveYouTubeTitle(entry.originalUrl);
@@ -434,7 +448,7 @@ export function SourceLibraryPanel({
                         }}
                       >
                         Refresh title
-                      </button>
+                      </Button>
                     )}
                     <label>
                       Folder{' '}
@@ -459,7 +473,8 @@ export function SourceLibraryPanel({
                   </div>
                 )}
                 <div className="library-source-actions">
-                  <button
+                  <Button
+                    variant="secondary"
                     disabled={entry.saved}
                     title={
                       entry.saved
@@ -469,22 +484,25 @@ export function SourceLibraryPanel({
                     onClick={() => void saveSource(entry)}
                   >
                     {entry.saved ? 'Saved to Library' : 'Save to Library'}
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    variant="primary"
                     disabled={state.tiles.length >= 9}
                     title={state.tiles.length >= 9 ? 'The wall is full (9 of 9).' : ''}
                     onClick={() => void addAsTile(entry)}
                   >
                     Add as Tile
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    variant="secondary"
                     disabled={!state.tiles.length}
                     title={!state.tiles.length ? 'Add an active tile before replacing one.' : ''}
                     onClick={() => void replaceTile(entry)}
                   >
                     Replace Tile
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    variant="secondary"
                     disabled={!state.tiles.length}
                     title={
                       !state.tiles.length ? 'Add an active tile before queueing a source.' : ''
@@ -492,11 +510,13 @@ export function SourceLibraryPanel({
                     onClick={() => void queueForTile(entry)}
                   >
                     Queue for Tile
-                  </button>
+                  </Button>
                   <a href={entry.originalUrl} target="_blank" rel="noreferrer">
                     Open Externally
                   </a>
-                  <button onClick={() => void copyUrl(entry)}>Copy URL</button>
+                  <Button variant="ghost" onClick={() => void copyUrl(entry)}>
+                    Copy URL
+                  </Button>
                 </div>
               </article>
             );
@@ -523,14 +543,15 @@ export function SourceLibraryPanel({
                 <span className="eyebrow">IMPORT PREVIEW</span>
                 <h2>Merge Source Library</h2>
               </div>
-              <button
+              <Button
+                variant="ghost"
                 type="button"
                 className="icon-button dialog-close"
                 aria-label="Close import preview"
                 onClick={() => setPendingImport(undefined)}
               >
                 ×
-              </button>
+              </Button>
             </div>
             <div className="dialog-body">
               <dl className="import-preview">
@@ -560,11 +581,11 @@ export function SourceLibraryPanel({
               </p>
             </div>
             <div className="dialog-actions">
-              <button className="secondary" onClick={() => setPendingImport(undefined)}>
+              <Button variant="secondary" onClick={() => setPendingImport(undefined)}>
                 Cancel
-              </button>
-              <button
-                className="primary"
+              </Button>
+              <Button
+                variant="primary"
                 onClick={async () => {
                   try {
                     const result = await importLibrary(pendingImport.payload);
@@ -576,7 +597,7 @@ export function SourceLibraryPanel({
                 }}
               >
                 Apply import
-              </button>
+              </Button>
             </div>
           </div>
         </div>

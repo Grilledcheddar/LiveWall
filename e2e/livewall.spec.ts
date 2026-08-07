@@ -1015,3 +1015,158 @@ test('P3 playback repair preserves ordered Admin control and active audio before
   ).toEqual(positions);
   await context.close();
 });
+
+test('production LiveWall Button variants own every application button state', async ({
+  browser,
+  request,
+}, testInfo) => {
+  const sourceUrl = 'https://www.youtube.com/playlist?list=PLcontrolstyles123';
+  await request.put('/api/state', {
+    data: {
+      version: 0,
+      updatedAt: Date.now(),
+      layoutMode: 'automatic',
+      tiles: [
+        {
+          id: 'styled-playlist',
+          name: 'Styled Playlist',
+          titleMode: 'manual',
+          source: {
+            type: 'youtube-playlist',
+            url: sourceUrl,
+            playlistId: 'PLcontrolstyles123',
+          },
+          playback: { behavior: 'resume' },
+          x: 0,
+          y: 0,
+          w: 12,
+          h: 12,
+          muted: true,
+          volume: 45,
+          displayOrder: 0,
+        },
+      ],
+    },
+  });
+  await request.put('/api/playback-progress', {
+    data: { sourceUrl, position: 84, duration: 300, playlistIndex: 2 },
+  });
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const admin = await context.newPage();
+  await admin.goto('/admin');
+
+  const unapprovedButtons = await admin
+    .locator('button:not(.lw-button)')
+    .evaluateAll((buttons) =>
+      buttons.map((button) => button.textContent?.trim() || button.getAttribute('aria-label')),
+    );
+  expect(unapprovedButtons).toEqual([]);
+  for (const button of await admin.locator('button.lw-button').all())
+    await expect(button).toHaveClass(/lw-button--(primary|secondary|destructive|ghost)/);
+
+  const readStyle = async (control: ReturnType<typeof admin.locator>) =>
+    control.evaluate((element) => {
+      const style = getComputedStyle(element);
+      const channels = (value: string) => (value.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number);
+      const luminance = (value: string) => {
+        const [red, green, blue] = channels(value).map((channel) => {
+          const normalized = channel / 255;
+          return normalized <= 0.03928 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+        });
+        return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+      };
+      const contrast = (first: string, second: string) => {
+        const lighter = Math.max(luminance(first), luminance(second));
+        const darker = Math.min(luminance(first), luminance(second));
+        return (lighter + 0.05) / (darker + 0.05);
+      };
+      return {
+        background: style.backgroundColor,
+        border: style.borderColor,
+        color: style.color,
+        cursor: style.cursor,
+        opacity: style.opacity,
+        outlineColor: style.outlineColor,
+        outlineStyle: style.outlineStyle,
+        outlineWidth: style.outlineWidth,
+        contrast: contrast(style.color, style.backgroundColor),
+      };
+    });
+
+  const playlist = admin
+    .locator('[data-testid="admin-tile"]')
+    .filter({ hasText: 'Styled Playlist' });
+  const clearPosition = playlist.getByRole('button', { name: 'Clear Saved Position' });
+  const disabledQueue = playlist.getByRole('button', { name: 'Queue' });
+  const restart = playlist.getByRole('button', { name: 'Restart' });
+  const previous = playlist.getByRole('button', { name: 'Previous Video' });
+  const next = playlist.getByRole('button', { name: 'Next Video' });
+  for (const control of [clearPosition, restart, previous, next]) {
+    await expect(control).toBeEnabled();
+    const style = await readStyle(control);
+    expect(style.contrast).toBeGreaterThanOrEqual(4.5);
+    expect(style.cursor).toBe('pointer');
+    expect(style.opacity).toBe('1');
+    expect(style.background).not.toBe('rgb(240, 240, 240)');
+    expect(style.border).not.toBe('rgb(0, 0, 0)');
+  }
+  await expect(disabledQueue).toBeDisabled();
+  const enabled = await readStyle(clearPosition);
+  const disabled = await readStyle(disabledQueue);
+  expect(disabled.background).not.toBe(enabled.background);
+  expect(disabled.border).not.toBe(enabled.border);
+  expect(disabled.color).not.toBe(enabled.color);
+  expect(disabled.contrast).toBeGreaterThanOrEqual(4.5);
+
+  await clearPosition.hover();
+  const hovered = await readStyle(clearPosition);
+  expect(hovered.background).not.toBe(enabled.background);
+  expect(hovered.border).not.toBe(enabled.border);
+  await clearPosition.focus();
+  const focused = await readStyle(clearPosition);
+  expect(focused.outlineStyle).not.toBe('none');
+  expect(focused.outlineWidth).toBe('3px');
+  expect(focused.outlineColor).toBe('rgb(200, 255, 61)');
+
+  const box = await restart.boundingBox();
+  expect(box).not.toBeNull();
+  await admin.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  await admin.mouse.down();
+  const pressed = await readStyle(restart);
+  await admin.mouse.up();
+  const restartResting = await readStyle(restart);
+  expect(pressed.background).not.toBe(restartResting.background);
+  expect(pressed.border).not.toBe(restartResting.border);
+
+  const playbackSelect = playlist.getByLabel('Start behavior');
+  const selectStyle = await readStyle(playbackSelect);
+  expect(selectStyle.contrast).toBeGreaterThanOrEqual(4.5);
+  expect(selectStyle.background).not.toBe('rgb(240, 240, 240)');
+  expect(selectStyle.cursor).toBe('pointer');
+
+  for (const [label, viewport] of [
+    ['100-percent', { width: 1440, height: 900 }],
+    ['125-percent', { width: 1152, height: 720 }],
+    ['150-percent', { width: 960, height: 600 }],
+  ] as const) {
+    await admin.setViewportSize(viewport);
+    await clearPosition.scrollIntoViewIfNeeded();
+    await expect(clearPosition).toBeVisible();
+    const overflow = await playlist.evaluate((card) => ({
+      clientWidth: card.clientWidth,
+      scrollWidth: card.scrollWidth,
+    }));
+    expect(overflow.scrollWidth, label).toBeLessThanOrEqual(overflow.clientWidth);
+    await playlist.screenshot({ path: testInfo.outputPath(`p3-controls-${label}.png`) });
+  }
+
+  const productionStylesheet = await admin.evaluate(() =>
+    [...document.styleSheets].some(
+      (sheet) =>
+        sheet.href?.includes('/assets/') &&
+        [...sheet.cssRules].some((rule) => rule.cssText.includes('.lw-button.lw-button')),
+    ),
+  );
+  expect(productionStylesheet).toBe(true);
+  await context.close();
+});

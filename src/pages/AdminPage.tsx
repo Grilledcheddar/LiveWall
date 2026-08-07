@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { type DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import GridLayout, { type Layout } from 'react-grid-layout';
+import { Button } from '../components/Button';
 import { SourceLibraryPanel } from '../components/SourceLibraryPanel';
 import { P3WorkspacePanel } from '../components/P3WorkspacePanel';
 import { useWall } from '../hooks/useWall';
@@ -256,7 +257,8 @@ export function SourceDialog({
             <span className="eyebrow">SOURCE SETUP</span>
             <h2 id="source-dialog-title">{heading}</h2>
           </div>
-          <button
+          <Button
+            variant="ghost"
             type="button"
             className="icon-button dialog-close"
             onClick={requestClose}
@@ -264,7 +266,7 @@ export function SourceDialog({
             title="Close dialog"
           >
             <X />
-          </button>
+          </Button>
         </div>
         <div className="dialog-body">
           {kind === 'replace' && tile && (
@@ -349,9 +351,14 @@ export function SourceDialog({
             </p>
           )}
           {titleMode === 'auto' && proposed?.type === 'youtube' && !titleLoading && (
-            <button type="button" className="refresh-title" onClick={() => void lookupTitle()}>
+            <Button
+              variant="secondary"
+              type="button"
+              className="refresh-title"
+              onClick={() => void lookupTitle()}
+            >
               <RefreshCw size={14} /> Refresh title
-            </button>
+            </Button>
           )}
           <p className="helper">
             Automatic YouTube titles are looked up once. You can always type a manual title instead.
@@ -403,12 +410,12 @@ export function SourceDialog({
           )}
         </div>
         <div className="dialog-actions">
-          <button type="button" className="secondary" onClick={requestClose}>
+          <Button variant="secondary" type="button" onClick={requestClose}>
             Cancel
-          </button>
-          <button className="primary" disabled={busy || titleLoading}>
+          </Button>
+          <Button variant="primary" type="submit" disabled={busy || titleLoading}>
             {busy ? 'Saving…' : kind === 'replace' ? 'Confirm replacement' : heading}
-          </button>
+          </Button>
         </div>
       </form>
     </div>
@@ -517,7 +524,8 @@ function TileCard({
   return (
     <article className="admin-tile-card" data-testid="admin-tile" data-tile-id={tile.id}>
       <header>
-        <button
+        <Button
+          variant="ghost"
           className="reorder-handle"
           draggable
           onDragStart={onDragStart}
@@ -525,7 +533,7 @@ function TileCard({
           title="Drag to reorder"
         >
           <GripVertical />
-        </button>
+        </Button>
         <div className="tile-number">{tile.name.slice(0, 2).toUpperCase()}</div>
         <div className="tile-title">
           <h3>{tile.name}</h3>
@@ -534,9 +542,9 @@ function TileCard({
             {isActiveAudio ? 'Active audio' : 'Muted mix'}
           </span>
         </div>
-        <button className="icon-button subtle" onClick={onEdit} title="Edit tile">
+        <Button variant="ghost" className="icon-button subtle" onClick={onEdit} title="Edit tile">
           <MoreHorizontal />
-        </button>
+        </Button>
       </header>
       <div className={`health-strip health-${health?.status ?? 'unknown'}`}>
         <span>
@@ -553,9 +561,9 @@ function TileCard({
             <code>{health.technicalDetail}</code>
           </details>
         )}
-        <button onClick={onRetry}>
+        <Button variant="secondary" onClick={onRetry}>
           <RotateCw size={13} /> Retry now
-        </button>
+        </Button>
       </div>
       <div className="source-strip">
         <div>
@@ -568,27 +576,31 @@ function TileCard({
         </a>
       </div>
       <div className="transport">
-        <button disabled={!controllable} onClick={() => onCommand('play')}>
+        <Button variant="secondary" disabled={!controllable} onClick={() => onCommand('play')}>
           <Play size={16} /> Play
-        </button>
-        <button disabled={!controllable} onClick={() => onCommand('pause')}>
+        </Button>
+        <Button variant="secondary" disabled={!controllable} onClick={() => onCommand('pause')}>
           <Pause size={16} /> Pause
-        </button>
-        <button className="replace-now" onClick={onReplace}>
+        </Button>
+        <Button variant="primary" className="replace-now" onClick={onReplace}>
           <Replace size={16} /> Replace Now
-        </button>
-        <button disabled={!controllable} onClick={() => onCommand('restart')}>
+        </Button>
+        <Button variant="secondary" disabled={!controllable} onClick={() => onCommand('restart')}>
           <RotateCw size={16} /> Restart
-        </button>
+        </Button>
         {health?.isLive && (
-          <button className="go-live" onClick={() => onCommand('go-live')}>
+          <Button variant="primary" className="go-live" onClick={() => onCommand('go-live')}>
             <Radio size={15} /> Go Live
-          </button>
+          </Button>
         )}
         {tile.source.type === 'youtube-playlist' && (
           <>
-            <button onClick={() => onCommand('previous')}>Previous Video</button>
-            <button onClick={() => onCommand('next')}>Next Video</button>
+            <Button variant="secondary" onClick={() => onCommand('previous')}>
+              Previous Video
+            </Button>
+            <Button variant="secondary" onClick={() => onCommand('next')}>
+              Next Video
+            </Button>
           </>
         )}
         <label className="seek-control">
@@ -599,9 +611,13 @@ function TileCard({
             value={seek}
             onChange={(event) => setSeek(Number(event.target.value))}
           />
-          <button disabled={!controllable} onClick={() => onCommand('seek', seek)}>
+          <Button
+            variant="secondary"
+            disabled={!controllable}
+            onClick={() => onCommand('seek', seek)}
+          >
             Go
-          </button>
+          </Button>
         </label>
       </div>
       <div className="playback-settings">
@@ -637,9 +653,9 @@ function TileCard({
               ? `Saved at ${formatTimestamp(progress.position)}`
               : 'No saved position'}
         </span>
-        <button disabled={!progress} onClick={() => void onClearPosition()}>
+        <Button variant="secondary" disabled={!progress} onClick={() => void onClearPosition()}>
           Clear Saved Position
-        </button>
+        </Button>
         <small>Changes apply the next time you restart or reload this source.</small>
       </div>
       {tile.source.type === 'youtube-playlist' && (
@@ -659,7 +675,8 @@ function TileCard({
         </div>
       )}
       <div className="audio-row">
-        <button
+        <Button
+          variant={isActiveAudio ? 'primary' : 'secondary'}
           className={isActiveAudio ? 'audio-active' : ''}
           disabled={!controllable}
           onClick={() => onCommand(tile.muted ? 'unmute' : 'mute')}
@@ -672,7 +689,7 @@ function TileCard({
               : tile.muted
                 ? 'Muted'
                 : 'Audible'}
-        </button>
+        </Button>
         <input
           aria-label={`Volume for ${tile.name}`}
           disabled={!controllable}
@@ -708,13 +725,14 @@ function TileCard({
             onChange={(event) => setQueueUrl(event.target.value)}
             placeholder="Paste next source URL"
           />
-          <button
+          <Button
+            variant="secondary"
             onClick={queue}
             disabled={!queueUrl}
             title={!queueUrl ? 'Paste a source URL before queueing.' : 'Queue this source'}
           >
             Queue
-          </button>
+          </Button>
         </div>
         <div className="queued-playback-settings">
           <label>
@@ -742,9 +760,9 @@ function TileCard({
         </div>
         {tile.queuedSource && (
           <div className="queue-actions">
-            <button className="play-next" onClick={() => void onPlayNext()}>
+            <Button variant="primary" className="play-next" onClick={() => void onPlayNext()}>
               <ChevronRight size={16} /> Play Next
-            </button>
+            </Button>
             <label>
               <input
                 type="number"
@@ -755,14 +773,16 @@ function TileCard({
               />{' '}
               sec
             </label>
-            <button
+            <Button
+              variant="secondary"
               onClick={() =>
                 onSave((current) => ({ ...current, scheduledAt: Date.now() + delay * 1_000 }))
               }
             >
               <Clock3 size={15} /> Schedule
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="ghost"
               onClick={() =>
                 onSave((current) => ({
                   ...current,
@@ -772,33 +792,40 @@ function TileCard({
               }
             >
               <TimerOff size={15} /> Cancel
-            </button>
+            </Button>
           </div>
         )}
       </div>
       <footer>
-        <button onClick={onFocus}>
+        <Button variant="secondary" onClick={onFocus}>
           <Focus size={15} /> Focus
-        </button>
-        <button onClick={onMoveUp} disabled={moveUpDisabled} aria-label={`Move ${tile.name} up`}>
+        </Button>
+        <Button
+          variant="ghost"
+          onClick={onMoveUp}
+          disabled={moveUpDisabled}
+          aria-label={`Move ${tile.name} up`}
+        >
           <ArrowUp size={15} /> Up
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="ghost"
           onClick={onMoveDown}
           disabled={moveDownDisabled}
           aria-label={`Move ${tile.name} down`}
         >
           <ArrowDown size={15} /> Down
-        </button>
+        </Button>
         {tile.titleMode === 'auto' && tile.source.type === 'youtube' && (
-          <button onClick={onRefreshTitle}>
+          <Button variant="secondary" onClick={onRefreshTitle}>
             <RefreshCw size={15} /> Refresh title
-          </button>
+          </Button>
         )}
-        <button onClick={onEdit}>
+        <Button variant="secondary" onClick={onEdit}>
           <Pencil size={15} /> Edit title
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="secondary"
           onClick={(event) => onSaveToLibrary(event.currentTarget)}
           disabled={libraryEntry?.saved}
           title={
@@ -808,8 +835,9 @@ function TileCard({
           }
         >
           {libraryEntry?.saved ? 'Saved to Library' : 'Save to Library'}
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="ghost"
           onClick={() => void onToggleFavorite()}
           disabled={!libraryEntry?.saved}
           aria-label={
@@ -826,10 +854,10 @@ function TileCard({
           }
         >
           {libraryEntry?.favorite ? '★ Favorited' : '☆ Add to favorites'}
-        </button>
-        <button className="danger-link" onClick={onDelete}>
+        </Button>
+        <Button variant="destructive" className="danger-link" onClick={onDelete}>
           <Trash2 size={15} /> Delete
-        </button>
+        </Button>
       </footer>
     </article>
   );
@@ -1051,7 +1079,8 @@ export function AdminPage() {
         {globalMessage && (
           <div className="feedback-banner" role="status">
             <span>{globalMessage}</span>
-            <button
+            <Button
+              variant="ghost"
               type="button"
               className="icon-button"
               aria-label="Dismiss notification"
@@ -1059,7 +1088,7 @@ export function AdminPage() {
               onClick={() => setGlobalMessage('')}
             >
               <X size={16} />
-            </button>
+            </Button>
           </div>
         )}
         <header className="topbar">
@@ -1071,20 +1100,21 @@ export function AdminPage() {
           <div className="top-actions">
             <div className="open-wall-group">
               {wallSessionStatus === 'open' ? (
-                <button
-                  className="secondary close-wall"
+                <Button
+                  variant="secondary"
+                  className="close-wall"
                   onClick={() => void controlDedicatedWall('close')}
                 >
                   <X size={16} /> Close Wall
-                </button>
+                </Button>
               ) : (
-                <button
-                  className="secondary"
+                <Button
+                  variant="secondary"
                   disabled={wallSessionStatus === 'checking'}
                   onClick={() => void controlDedicatedWall('open')}
                 >
                   <Maximize2 size={16} /> Open Wall
-                </button>
+                </Button>
               )}
               <a href="/wall" target="_blank">
                 Open normal Wall
@@ -1095,13 +1125,13 @@ export function AdminPage() {
                   : 'Reopen on Monitor 2 in kiosk mode.'}
               </small>
             </div>
-            <button
-              className="primary"
+            <Button
+              variant="primary"
               disabled={state.tiles.length >= 9}
               onClick={(event) => openDialog({ mode: 'add' }, event.currentTarget)}
             >
               <Plus size={17} /> Add Source
-            </button>
+            </Button>
           </div>
         </header>
         <div className="summary-bar">
@@ -1119,23 +1149,27 @@ export function AdminPage() {
           </div>
           <div className="layout-switch">
             <span>LAYOUT</span>
-            <button
+            <Button
+              variant="ghost"
               className={state.layoutMode === 'automatic' ? 'selected' : ''}
+              aria-pressed={state.layoutMode === 'automatic'}
               onClick={() =>
                 void patchState((current) => ({ ...current, layoutMode: 'automatic' }))
               }
             >
               <Grid2X2 size={15} /> Auto
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="ghost"
               className={state.layoutMode === 'freeform' ? 'selected' : ''}
+              aria-pressed={state.layoutMode === 'freeform'}
               onClick={() => {
                 void patchState((current) => ({ ...current, layoutMode: 'freeform' }));
                 setLayoutEditing(true);
               }}
             >
               <Grip size={15} /> Freeform
-            </button>
+            </Button>
           </div>
         </div>
         <section className="p1-control-panel" aria-label="Wall controls">
@@ -1149,32 +1183,45 @@ export function AdminPage() {
             </span>
           </div>
           <div className="global-actions">
-            <button onClick={() => void runGlobal('play')} disabled={state.globallyStopped}>
+            <Button
+              variant="secondary"
+              onClick={() => void runGlobal('play')}
+              disabled={state.globallyStopped}
+            >
               <Play size={16} /> Play All
-            </button>
-            <button onClick={() => void runGlobal('pause')} disabled={state.globallyStopped}>
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => void runGlobal('pause')}
+              disabled={state.globallyStopped}
+            >
               <Pause size={16} /> Pause All
-            </button>
-            <button onClick={() => void muteAll()}>
+            </Button>
+            <Button variant="secondary" onClick={() => void muteAll()}>
               <VolumeX size={16} /> Mute All
-            </button>
+            </Button>
             {!state.globallyStopped ? (
-              <button className="danger-control" onClick={() => void stopAll()}>
+              <Button
+                variant="destructive"
+                className="danger-control"
+                onClick={() => void stopAll()}
+              >
                 <Square size={15} /> Stop All
-              </button>
+              </Button>
             ) : (
-              <button className="resume-control" onClick={() => void resumeAll()}>
+              <Button variant="primary" className="resume-control" onClick={() => void resumeAll()}>
                 <Play size={16} /> Resume All
-              </button>
+              </Button>
             )}
             {state.focusedTileId && (
-              <button
+              <Button
+                variant="secondary"
                 onClick={() =>
                   void patchState((current) => ({ ...current, focusedTileId: undefined }))
                 }
               >
                 <X size={16} /> Exit Focus
-              </button>
+              </Button>
             )}
           </div>
         </section>
@@ -1192,32 +1239,36 @@ export function AdminPage() {
             </div>
           </div>
           <div className="preset-actions">
-            <button
+            <Button
+              variant="ghost"
               onClick={() => updateAppearance({ gap: 0, borderVisible: false, cornerRadius: 0 })}
             >
               Seamless
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="ghost"
               onClick={() =>
                 updateAppearance({ gap: 4, borderVisible: true, borderWidth: 1, cornerRadius: 4 })
               }
             >
               Subtle
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="ghost"
               onClick={() =>
                 updateAppearance({ gap: 12, borderVisible: true, borderWidth: 2, cornerRadius: 10 })
               }
             >
               Framed
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="ghost"
               onClick={() =>
                 void patchState((current) => ({ ...current, appearance: defaultAppearance() }))
               }
             >
               Reset
-            </button>
+            </Button>
           </div>
           <div className="appearance-fields">
             <label>
@@ -1319,12 +1370,12 @@ export function AdminPage() {
             <span className="eyebrow">YOUR WALL IS STANDING BY</span>
             <h2>Add your first video source</h2>
             <p>Start with a YouTube video, live stream, HLS feed, or embeddable website.</p>
-            <button
-              className="primary"
+            <Button
+              variant="primary"
               onClick={(event) => openDialog({ mode: 'add' }, event.currentTarget)}
             >
               <Plus /> Add Source
-            </button>
+            </Button>
           </section>
         ) : (
           <section className="tile-list">
@@ -1421,9 +1472,9 @@ export function AdminPage() {
                 <h2>Freeform layout</h2>
                 <span>Drag and resize</span>
               </div>
-              <button className="secondary" onClick={() => setLayoutEditing(!layoutEditing)}>
+              <Button variant="secondary" onClick={() => setLayoutEditing(!layoutEditing)}>
                 {layoutEditing ? 'Done arranging' : 'Arrange tiles'}
-              </button>
+              </Button>
             </div>
             <GridLayout
               layout={tiles.map((tile) => ({

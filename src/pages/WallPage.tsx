@@ -2,6 +2,7 @@ import { Focus, Maximize, Minimize, Radio, Volume2, X } from 'lucide-react';
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import GridLayout from 'react-grid-layout';
+import { Button } from '../components/Button';
 import { PlayerTile } from '../components/PlayerTile';
 import { useWall } from '../hooks/useWall';
 import {
@@ -114,22 +115,24 @@ export function WallPage() {
       >
         <div className={`wall-controls ${controlsVisible ? 'visible' : ''}`}>
           {!kioskLaunch && (
-            <button
+            <Button
+              variant="ghost"
               className="fullscreen-button"
               onClick={() => void toggleFullscreen()}
               aria-label={fullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
             >
               {fullscreen ? <Minimize size={17} /> : <Maximize size={17} />}
               <span>{fullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}</span>
-            </button>
+            </Button>
           )}
           {state.focusedTileId && (
-            <button
+            <Button
+              variant="ghost"
               className="fullscreen-button"
               onClick={() => void save((current) => ({ ...current, focusedTileId: undefined }))}
             >
               <X size={17} /> <span>Exit Focus</span>
-            </button>
+            </Button>
           )}
         </div>
         <div className={`wall-connection ${connected ? 'online' : ''}`}>
@@ -185,13 +188,14 @@ export function WallPage() {
                   )}
                   onPlaybackProgress={reportPlaybackProgress}
                 />
-                <button
+                <Button
+                  variant="ghost"
                   className="tile-focus-button"
                   aria-label={`Focus ${tile.name}`}
                   onClick={() => void save((current) => ({ ...current, focusedTileId: tile.id }))}
                 >
                   <Focus size={15} />
-                </button>
+                </Button>
               </div>
             ))}
           </GridLayout>
@@ -199,7 +203,8 @@ export function WallPage() {
       </main>
       {audioActivationRequired &&
         createPortal(
-          <button
+          <Button
+            variant="primary"
             type="button"
             className="audio-activation-overlay"
             onClick={() => window.dispatchEvent(new Event('livewall-enable-audio'))}
@@ -207,7 +212,7 @@ export function WallPage() {
             <Volume2 size={22} />
             <strong>Enable Audio</strong>
             <span>Click once to allow sound in this Wall window.</span>
-          </button>,
+          </Button>,
           document.body,
         )}
     </>
