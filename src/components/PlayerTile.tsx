@@ -103,7 +103,11 @@ export const PlayerTile = memo(function PlayerTile({
   const messageTimer = useRef<number | undefined>(undefined);
   const latestName = useRef(tile.name);
   const liveSource = useRef(false);
+  const playbackRef = useRef(tile.playback);
+  const progressRef = useRef(progress);
   latestName.current = tile.name;
+  playbackRef.current = tile.playback;
+  progressRef.current = progress;
 
   const publish = useCallback(
     (
@@ -238,19 +242,19 @@ export const PlayerTile = memo(function PlayerTile({
       current.goLive();
       return;
     }
-    const behavior = tile.playback?.behavior ?? 'resume';
+    const behavior = playbackRef.current?.behavior ?? 'resume';
     if (behavior === 'beginning') current.seek(0);
-    else if (behavior === 'specific') current.seek(tile.playback?.specificTime ?? 0);
+    else if (behavior === 'specific') current.seek(playbackRef.current?.specificTime ?? 0);
     else if (behavior === 'resume')
       current.seek(
         resumeTarget(
-          progress ??
+          progressRef.current ??
             (typeof tile.resumePosition === 'number'
               ? { position: tile.resumePosition, duration: undefined }
               : undefined),
         ),
       );
-  }, [progress, tile.playback?.behavior, tile.playback?.specificTime, tile.resumePosition]);
+  }, [tile.resumePosition]);
 
   const scheduleRetry = useCallback(
     (friendly: string, detail: string) => {

@@ -1105,6 +1105,207 @@ a {
   }
 }
 
+.p3-workspace {
+  margin: 0 32px 22px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #11171d;
+  overflow: hidden;
+}
+.workspace-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  background: #0b1015;
+}
+.workspace-tabs button[aria-selected='true'] {
+  color: #0b100d;
+  background: var(--lime);
+  border-color: var(--lime);
+}
+.workspace-panel {
+  padding: 20px;
+}
+.layout-cards,
+.preset-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 12px;
+}
+.layout-card,
+.preset-card {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid #33404c;
+  border-radius: 9px;
+  background: #0c1218;
+}
+.layout-card > div:nth-child(2),
+.preset-card > div:nth-child(2) {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+.layout-card small,
+.preset-card small {
+  color: #aab8c5;
+}
+.layout-preview {
+  display: grid;
+  width: 100%;
+  min-height: 68px;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid #4b5b68;
+  border-radius: 5px;
+  background: #06090c;
+}
+.layout-preview span {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  min-height: 0;
+  color: #dfffa0;
+  font-size: 11px;
+  font-weight: 800;
+  border: 1px solid #78992c;
+  border-radius: 2px;
+  background: #26341b;
+}
+.card-actions,
+.builder-tools {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.card-actions button svg {
+  width: 15px;
+  height: 15px;
+}
+.workspace-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  color: #c8d4df;
+  border: 1px solid #3b4955;
+  border-radius: 7px;
+  background: #0b1116;
+}
+.workspace-state.modified {
+  border-color: #a47d31;
+  background: #211a0e;
+}
+.workspace-state div {
+  display: flex;
+  gap: 7px;
+  margin-left: auto;
+}
+.preset-filters {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.preset-filters label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.empty-state {
+  padding: 24px;
+  color: #aab8c5;
+  text-align: center;
+  border: 1px dashed #46535f;
+  border-radius: 8px;
+}
+.p3-dialog {
+  width: min(820px, calc(100vw - 28px));
+}
+.preview-dialog > .layout-preview,
+.wall-preview > .layout-preview,
+.layout-builder > .layout-preview {
+  min-height: 220px;
+}
+.wall-preview ol {
+  display: grid;
+  gap: 7px;
+  padding-left: 22px;
+}
+.wall-preview li small {
+  display: block;
+  overflow: hidden;
+  color: #aab8c5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.builder-grid-size,
+.slot-editor-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.slot-editor-list fieldset {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+  padding: 10px;
+  border: 1px solid #3d4a55;
+  border-radius: 7px;
+}
+.slot-editor-list fieldset button {
+  grid-column: 1 / -1;
+}
+.builder-preview-callout {
+  display: grid;
+  grid-template-columns: minmax(200px, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid #607633;
+  border-radius: 7px;
+}
+.validation-error {
+  color: #ffd082 !important;
+  font-size: 12px;
+}
+@media (max-width: 850px) {
+  .p3-workspace {
+    margin-left: 20px;
+    margin-right: 20px;
+  }
+  .builder-grid-size,
+  .slot-editor-list {
+    grid-template-columns: 1fr;
+  }
+  .preset-filters {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+@media (max-width: 560px) {
+  .layout-cards,
+  .preset-cards {
+    grid-template-columns: 1fr;
+  }
+  .slot-editor-list fieldset {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .p3-workspace *,
+  .p3-dialog * {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 /* Usability checkpoint controls */
 .open-wall-group {
   display: grid;

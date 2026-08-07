@@ -31,6 +31,7 @@ import {
 import { type DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import GridLayout, { type Layout } from 'react-grid-layout';
 import { SourceLibraryPanel } from '../components/SourceLibraryPanel';
+import { P3WorkspacePanel } from '../components/P3WorkspacePanel';
 import { useWall } from '../hooks/useWall';
 import { normalizeSourceLibrary, saveLibrarySource, setLibraryFavorite } from '../lib/library';
 import { canonicalSourceUrl, detectSource } from '../lib/sources';
@@ -48,7 +49,23 @@ import {
   selectActiveAudio,
 } from '../lib/state';
 import { fallbackTitle, finalizeTitle, resolveYouTubeTitle } from '../lib/titles';
-import type { PlayerHealth, Tile, VideoSource, WallAppearance, WallState } from '../lib/types';
+import {
+  defaultStartBehavior,
+  formatTimestamp,
+  normalizePlaybackStart,
+  parseTimestamp,
+  playbackKey,
+} from '../lib/playback';
+import type {
+  PlaybackProgress,
+  PlaybackStart,
+  PlayerCommandName,
+  PlayerHealth,
+  Tile,
+  VideoSource,
+  WallAppearance,
+  WallState,
+} from '../lib/types';
 
 function Countdown({ timestamp }: { timestamp: number }) {
   const [now, setNow] = useState(() => Date.now());
@@ -69,6 +86,7 @@ export interface SourceDialogResult {
   source: VideoSource;
   titleMode: 'auto' | 'manual';
   saveToLibrary: boolean;
+  playback: PlaybackStart;
 }
 
 export function SourceDialog({
@@ -87,10 +105,16 @@ export function SourceDialog({
   const initialName = tile?.name ?? '';
   const initialUrl = kind === 'edit' || kind === 'save' ? (tile?.source.url ?? '') : '';
   const initialTitleMode = tile?.titleMode ?? 'manual';
+  const initialPlayback =
+    tile?.playback ?? (tile ? defaultStartBehavior(tile.source) : { behavior: 'resume' as const });
   const [name, setName] = useState(initialName);
   const [url, setUrl] = useState(initialUrl);
   const [titleMode, setTitleMode] = useState<'auto' | 'manual'>(initialTitleMode);
   const [saveToLibrary, setSaveToLibrary] = useState(kind === 'save');
+  const [startBehavior, setStartBehavior] = useState(initialPlayback.behavior);
+  const [specificTime, setSpecificTime] = useState(
+    initialPlayback.specificTime === undefined ? '' : formatTimestamp(initialPlayback.specificTime),
+  );
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [titleLoading, setTitleLoading] = useState(false);
@@ -108,7 +132,12 @@ export function SourceDialog({
     name !== initialName ||
     url !== initialUrl ||
     titleMode !== initialTitleMode ||
-    (kind !== 'save' && saveToLibrary);
+    (kind !== 'save' && saveToLibrary) ||
+    startBehavior !== initialPlayback.behavior ||
+    specificTime !==
+      (initialPlayback.specificTime === undefined
+        ? ''
+        : formatTimestamp(initialPlayback.specificTime));
   function requestClose() {
     if (dirty && !confirm('Discard your unsaved changes?')) return;
     onClose();
@@ -185,7 +214,20 @@ export function SourceDialog({
       const source = kind === 'edit' || kind === 'save' ? tile!.source : detectSource(url);
       setBusy(true);
       const finalName = await finalizeTitle(source, titleMode, name);
-      await onSubmit({ name: finalName, source, titleMode, saveToLibrary });
+      const parsedSpecific =
+        startBehavior === 'specific' ? parseTimestamp(specificTime) : undefined;
+      if (startBehavior === 'specific' && parsedSpecific === undefined)
+        throw new Error('Enter a start time in seconds or a value such as 1:25:30.');
+      await onSubmit({
+        name: finalName,
+        source,
+        titleMode,
+        saveToLibrary,
+        playback: normalizePlaybackStart(
+          { behavior: startBehavior, specificTime: parsedSpecific },
+          source,
+        ),
+      });
       onClose();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'That source could not be saved.');
@@ -314,6 +356,37 @@ export function SourceDialog({
           <p className="helper">
             Automatic YouTube titles are looked up once. You can always type a manual title instead.
           </p>
+          <fieldset className="start-behavior">
+            <legend>Start behavior</legend>
+            <label>
+              Behavior
+              <select
+                value={startBehavior}
+                onChange={(event) =>
+                  setStartBehavior(event.target.value as PlaybackStart['behavior'])
+                }
+              >
+                <option value="live">Live edge</option>
+                <option value="resume">Resume where I stopped</option>
+                <option value="specific">Start at a specific time</option>
+                <option value="beginning">Start from beginning</option>
+              </select>
+            </label>
+            {startBehavior === 'specific' && (
+              <label>
+                Specific time
+                <input
+                  aria-label="Specific start time"
+                  value={specificTime}
+                  onChange={(event) => setSpecificTime(event.target.value)}
+                  placeholder="1:25:30 or seconds"
+                />
+              </label>
+            )}
+            {proposed?.type === 'website' && (
+              <small>Playback restoration is unavailable for generic website embeds.</small>
+            )}
+          </fieldset>
           {error && <p className="form-error">{error}</p>}
           {kind !== 'save' && (
             <label className="save-library-option">
@@ -364,15 +437,14 @@ function TileCard({
   libraryEntry,
   onSaveToLibrary,
   onToggleFavorite,
+  progress,
+  onClearPosition,
 }: {
   tile: Tile;
   isActiveAudio: boolean;
   onSave: (update: (tile: Tile) => Tile) => Promise<unknown>;
   onDelete: () => void;
-  onCommand: (
-    command: 'play' | 'pause' | 'seek' | 'mute' | 'unmute' | 'volume',
-    value?: number,
-  ) => void;
+  onCommand: (command: PlayerCommandName, value?: number) => void;
   onEdit: () => void;
   onReplace: () => void;
   onRefreshTitle: () => void;
@@ -384,16 +456,20 @@ function TileCard({
   moveUpDisabled: boolean;
   moveDownDisabled: boolean;
   onDragStart: (event: DragEvent<HTMLButtonElement>) => void;
-  onQueue: (source: VideoSource) => Promise<unknown>;
+  onQueue: (source: VideoSource, playback: PlaybackStart) => Promise<unknown>;
   onPlayNext: () => Promise<unknown>;
   libraryEntry?: import('../lib/types').LibrarySource;
   onSaveToLibrary: (trigger: HTMLElement) => void;
   onToggleFavorite: () => Promise<unknown>;
+  progress?: PlaybackProgress;
+  onClearPosition: () => Promise<unknown>;
 }) {
   const [queueUrl, setQueueUrl] = useState('');
   const [delay, setDelay] = useState(60);
   const [seek, setSeek] = useState(0);
   const [volumeDraft, setVolumeDraft] = useState(tile.volume);
+  const [queueBehavior, setQueueBehavior] = useState<PlaybackStart['behavior']>('resume');
+  const [queueSpecificTime, setQueueSpecificTime] = useState('');
   const volumeTimer = useRef<number | undefined>(undefined);
   const latestVolume = useRef(tile.volume);
   const controllable = tile.source.type !== 'website';
@@ -424,7 +500,14 @@ function TileCard({
   async function queue() {
     try {
       const source = detectSource(queueUrl);
-      await onQueue(source);
+      const specificTime =
+        queueBehavior === 'specific' ? parseTimestamp(queueSpecificTime) : undefined;
+      if (queueBehavior === 'specific' && specificTime === undefined)
+        throw new Error('Enter a valid queued start time.');
+      await onQueue(
+        source,
+        normalizePlaybackStart({ behavior: queueBehavior, specificTime }, source),
+      );
       setQueueUrl('');
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Invalid source URL.');
@@ -494,6 +577,20 @@ function TileCard({
         <button className="replace-now" onClick={onReplace}>
           <Replace size={16} /> Replace Now
         </button>
+        <button disabled={!controllable} onClick={() => onCommand('restart')}>
+          <RotateCw size={16} /> Restart
+        </button>
+        {health?.isLive && (
+          <button className="go-live" onClick={() => onCommand('go-live')}>
+            <Radio size={15} /> Go Live
+          </button>
+        )}
+        {tile.source.type === 'youtube-playlist' && (
+          <>
+            <button onClick={() => onCommand('previous')}>Previous Video</button>
+            <button onClick={() => onCommand('next')}>Next Video</button>
+          </>
+        )}
         <label className="seek-control">
           Seek
           <input
@@ -507,6 +604,60 @@ function TileCard({
           </button>
         </label>
       </div>
+      <div className="playback-settings">
+        <label>
+          Start behavior
+          <select
+            value={tile.playback?.behavior ?? defaultStartBehavior(tile.source).behavior}
+            onChange={(event) =>
+              void onSave((current) => ({
+                ...current,
+                playback: normalizePlaybackStart(
+                  {
+                    behavior: event.target.value,
+                    specificTime: current.playback?.specificTime,
+                  },
+                  current.source,
+                ),
+              }))
+            }
+          >
+            <option value="live">Live edge</option>
+            <option value="resume">Resume where I stopped</option>
+            <option value="specific">Specific time</option>
+            <option value="beginning">Beginning</option>
+          </select>
+        </label>
+        <span>
+          {health?.isLive
+            ? health.atLiveEdge
+              ? 'LIVE'
+              : 'Behind live'
+            : progress
+              ? `Saved at ${formatTimestamp(progress.position)}`
+              : 'No saved position'}
+        </span>
+        <button disabled={!progress} onClick={() => void onClearPosition()}>
+          Clear Saved Position
+        </button>
+        <small>Changes apply the next time you restart or reload this source.</small>
+      </div>
+      {tile.source.type === 'youtube-playlist' && (
+        <div className="playlist-status">
+          <strong>
+            Playlist{' '}
+            {typeof health?.playlistIndex === 'number'
+              ? health.playlistIndex + 1
+              : tile.playlistIndex !== undefined
+                ? tile.playlistIndex + 1
+                : 1}
+            {health?.playlistLength ? ` of ${health.playlistLength}` : ''}
+          </strong>
+          {health?.currentTitle && <span>{health.currentTitle}</span>}
+          {health?.upNextTitle && <small>Up next: {health.upNextTitle}</small>}
+          {health?.warning && <p role="alert">{health.warning}</p>}
+        </div>
+      )}
       <div className="audio-row">
         <button
           className={isActiveAudio ? 'audio-active' : ''}
@@ -558,6 +709,30 @@ function TileCard({
           >
             Queue
           </button>
+        </div>
+        <div className="queued-playback-settings">
+          <label>
+            Queued start
+            <select
+              value={queueBehavior}
+              onChange={(event) =>
+                setQueueBehavior(event.target.value as PlaybackStart['behavior'])
+              }
+            >
+              <option value="live">Live edge</option>
+              <option value="resume">Resume</option>
+              <option value="specific">Specific time</option>
+              <option value="beginning">Beginning</option>
+            </select>
+          </label>
+          {queueBehavior === 'specific' && (
+            <input
+              aria-label={`Queued start time for ${tile.name}`}
+              value={queueSpecificTime}
+              onChange={(event) => setQueueSpecificTime(event.target.value)}
+              placeholder="1:25:30"
+            />
+          )}
         </div>
         {tile.queuedSource && (
           <div className="queue-actions">
@@ -662,8 +837,22 @@ type DialogState = { returnFocus?: HTMLElement | null } & (
 );
 
 export function AdminPage() {
-  const { state, save, saveLibrary, importLibrary, connected, command, healthByTile, stateError } =
-    useWall();
+  const {
+    state,
+    save,
+    saveLibrary,
+    importLibrary,
+    connected,
+    command,
+    healthByTile,
+    progress,
+    templates,
+    presets,
+    saveTemplates,
+    savePresets,
+    clearPlaybackProgress,
+    stateError,
+  } = useWall();
   const [dialog, setDialog] = useState<DialogState>();
   const [layoutEditing, setLayoutEditing] = useState(false);
   const [draggedTileId, setDraggedTileId] = useState<string>();
@@ -1100,6 +1289,15 @@ export function AdminPage() {
             </label>
           </div>
         </section>
+        <P3WorkspacePanel
+          state={state}
+          templates={templates}
+          presets={presets}
+          saveState={patchState}
+          saveTemplates={saveTemplates}
+          savePresets={savePresets}
+          onFeedback={setGlobalMessage}
+        />
         <SourceLibraryPanel
           state={{ ...state, library: normalizeSourceLibrary(state.library) }}
           saveState={patchState}
@@ -1164,7 +1362,7 @@ export function AdminPage() {
                     event.dataTransfer.effectAllowed = 'move';
                     event.dataTransfer.setData('text/plain', tile.id);
                   }}
-                  onQueue={(source) =>
+                  onQueue={(source, playback) =>
                     patchState((current) => {
                       const recorded = recordSourceInState(
                         current,
@@ -1176,7 +1374,12 @@ export function AdminPage() {
                         ...recorded,
                         tiles: recorded.tiles.map((candidate) =>
                           candidate.id === tile.id
-                            ? { ...candidate, queuedSource: source, scheduledAt: undefined }
+                            ? {
+                                ...candidate,
+                                queuedSource: source,
+                                queuedPlayback: playback,
+                                scheduledAt: undefined,
+                              }
                             : candidate,
                         ),
                       };
@@ -1188,6 +1391,10 @@ export function AdminPage() {
                   )}
                   onSaveToLibrary={(trigger) => openDialog({ mode: 'save', tile }, trigger)}
                   onToggleFavorite={() => toggleFavorite(tile)}
+                  progress={progress?.entries?.find(
+                    (entry) => entry.key === playbackKey(tile.source),
+                  )}
+                  onClearPosition={() => clearPlaybackProgress(tile.source.url)}
                   onCommand={(name, value) => {
                     if (name === 'unmute') void setAudio(tile.id);
                     else {
@@ -1242,18 +1449,22 @@ export function AdminPage() {
           kind="add"
           returnFocus={dialog.returnFocus}
           onClose={() => setDialog(undefined)}
-          onSubmit={async ({ name, source, titleMode, saveToLibrary }) => {
+          onSubmit={async ({ name, source, titleMode, saveToLibrary, playback }) => {
             await patchState((current) => {
               const recorded = recordSourceInState(current, source, name, titleMode);
               const library = saveToLibrary
-                ? saveLibrarySource(recorded.library, source, name, titleMode)
+                ? saveLibrarySource(recorded.library, source, name, titleMode, Date.now(), playback)
                 : recorded.library;
               return {
                 ...recorded,
                 library,
                 tiles: [
                   ...recorded.tiles,
-                  { ...newTile(name, source, titleMode), displayOrder: recorded.tiles.length },
+                  {
+                    ...newTile(name, source, titleMode),
+                    playback,
+                    displayOrder: recorded.tiles.length,
+                  },
                 ],
               };
             });
@@ -1267,14 +1478,14 @@ export function AdminPage() {
           tile={dialog.tile}
           returnFocus={dialog.returnFocus}
           onClose={() => setDialog(undefined)}
-          onSubmit={async ({ name, source, titleMode, saveToLibrary }) => {
+          onSubmit={async ({ name, source, titleMode, saveToLibrary, playback }) => {
             await patchState((current) => ({
               ...current,
               tiles: current.tiles.map((tile) =>
-                tile.id === dialog.tile.id ? { ...tile, name, titleMode } : tile,
+                tile.id === dialog.tile.id ? { ...tile, name, titleMode, playback } : tile,
               ),
               library: saveToLibrary
-                ? saveLibrarySource(current.library, source, name, titleMode)
+                ? saveLibrarySource(current.library, source, name, titleMode, Date.now(), playback)
                 : current.library,
             }));
             if (saveToLibrary) setGlobalMessage(`Saved ‘${name}’ to Source Library.`);
@@ -1287,10 +1498,10 @@ export function AdminPage() {
           tile={dialog.tile}
           returnFocus={dialog.returnFocus}
           onClose={() => setDialog(undefined)}
-          onSubmit={async ({ name, source, titleMode, saveToLibrary }) => {
+          onSubmit={async ({ name, source, titleMode, saveToLibrary, playback }) => {
             await patchState((current) => {
               const recorded = recordSourceInState(
-                replaceTileSource(current, dialog.tile.id, { name, source, titleMode }),
+                replaceTileSource(current, dialog.tile.id, { name, source, titleMode, playback }),
                 source,
                 name,
                 titleMode,
@@ -1298,7 +1509,14 @@ export function AdminPage() {
               return {
                 ...recorded,
                 library: saveToLibrary
-                  ? saveLibrarySource(recorded.library, source, name, titleMode)
+                  ? saveLibrarySource(
+                      recorded.library,
+                      source,
+                      name,
+                      titleMode,
+                      Date.now(),
+                      playback,
+                    )
                   : recorded.library,
               };
             });
@@ -1312,8 +1530,10 @@ export function AdminPage() {
           tile={dialog.tile}
           returnFocus={dialog.returnFocus}
           onClose={() => setDialog(undefined)}
-          onSubmit={async ({ name, source, titleMode }) => {
-            await saveLibrary(saveLibrarySource(state.library, source, name, titleMode));
+          onSubmit={async ({ name, source, titleMode, playback }) => {
+            await saveLibrary(
+              saveLibrarySource(state.library, source, name, titleMode, Date.now(), playback),
+            );
             setGlobalMessage(`Saved ‘${name}’ to Source Library.`);
           }}
         />

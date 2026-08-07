@@ -88,16 +88,32 @@ export function SourceLibraryPanel({
   }
 
   async function saveSource(entry: LibrarySource) {
-    await saveLibrary(saveLibrarySource(state.library, entry.source, entry.title, entry.titleMode));
+    await saveLibrary(
+      saveLibrarySource(
+        state.library,
+        entry.source,
+        entry.title,
+        entry.titleMode,
+        Date.now(),
+        entry.playback,
+      ),
+    );
     onFeedback(`Saved ‘${entry.title}’ to Source Library.`);
   }
 
   async function addAsTile(entry: LibrarySource) {
     if (state.tiles.length >= 9)
       return onFeedback('The wall already has the maximum of nine tiles.');
-    await saveState((current) =>
-      addSourceAsTile(current, entry.source, entry.title, entry.titleMode),
-    );
+    await saveState((current) => {
+      const next = addSourceAsTile(current, entry.source, entry.title, entry.titleMode);
+      const added = next.tiles[next.tiles.length - 1];
+      return {
+        ...next,
+        tiles: next.tiles.map((tile) =>
+          tile.id === added?.id ? { ...tile, playback: entry.playback } : tile,
+        ),
+      };
+    });
     onFeedback(`Added ‘${entry.title}’ as a tile.`);
   }
 
@@ -116,6 +132,7 @@ export function SourceLibraryPanel({
           name: entry.title,
           source: entry.source,
           titleMode: entry.titleMode,
+          playback: entry.playback,
         }),
         entry.source,
         entry.title,
@@ -141,6 +158,8 @@ export function SourceLibraryPanel({
         entry.title,
         entry.titleMode,
         Boolean(tile.queuedSource),
+        Date.now(),
+        entry.playback,
       ),
     );
     onFeedback(`Queued ‘${entry.title}’ for ‘${tile.name}’.`);
