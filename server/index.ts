@@ -379,7 +379,7 @@ wss.on('connection', (socket) => {
 
 const dist = path.join(root, 'dist');
 app.use(express.static(dist));
-app.use((_req, res) => res.sendFile(path.join(dist, 'index.html')));
+app.use((_req, res) => res.sendFile('index.html', { root: dist }));
 
 const reconciliationTimer = setInterval(async () => {
   if (!stateLoadError && (await store.reconcile()))
