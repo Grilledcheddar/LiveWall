@@ -4,6 +4,9 @@
   "wallMode": "kiosk",
   "browser": "chrome",
   "wallAutoplayWithSound": true,
+  "externalTvMonitor": "\\\\.\\DISPLAY2",
+  "externalTvProfileDir": "data\\launcher\\browser-profiles\\external-tv",
+  "externalTvFullscreen": true,
   "port": 4174,
   "startupTimeoutSeconds": 30
 }

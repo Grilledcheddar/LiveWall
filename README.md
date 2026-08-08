@@ -53,6 +53,8 @@ LiveWall only listens on `127.0.0.1`. Other computers on the network cannot conn
 - **Source Library**, **Wall Layouts**, and **Named Walls** can be collapsed independently; their state is kept only in that Admin browser. Library folders can also be collapsed without changing sources, folders, filters, or the wall.
 - **Named Walls** stores explicit snapshots. Preview a preset before replacing the workspace, or apply only its layout. Live edits continue to autosave for recovery but never overwrite a preset until **Update Preset** is chosen; **Save As** makes an independent preset.
 - Quality controls are capability-aware. YouTube continues to choose quality automatically and exposes its native Wall-player gear; generic embeds remain provider-controlled. HLS starts in adaptive **Auto**, lists manifest resolutions/bitrates, and uses a next-segment switch for a saved per-source manual preference. A missing saved level safely falls back to Auto.
+- Generic websites use **Safe Embed** by default: a no-referrer, sandboxed frame that permits scripts, same-origin content, and presentation only. **Compatibility Embed** is a per-source confirmation that additionally permits normal forms; it still blocks popups, downloads, top navigation, and sandbox escape. **External Only** never embeds the site.
+- Use **Watch on Wall** for a provider that does not embed. LiveWall suspends its Wall, opens the URL in the dedicated External TV window on the Wall monitor, and restores the Wall when you choose **Return to Wall** or close that dedicated window. The provider controls playback, volume, login, subscriptions, and DRM. LiveWall does not bypass provider restrictions.
 
 Volume changes are sent directly to the selected player while the slider moves and saved after a short debounce. They do not reload the Wall or recreate players.
 
@@ -73,7 +75,7 @@ Hulu, Paramount+, DIRECTV, and YouTube TV cannot be embedded as normal LiveWall 
 
 ## Saved configuration, backup, and reset
 
-The authoritative live workspace is stored in `data\wall-state.json`. It contains source URLs, queues, absolute timer timestamps, layout coordinates, display order, volume, mute state, title mode, active audio selection, stop/resume state, focus selection, overlays, appearance, and the Source Library. Named presets live in `data\wall-presets.json`, custom templates in `data\layout-templates.json`, and throttled VOD/playlist resume progress in `data\playback-progress.json`. Runtime health and dedicated-browser session records are intentionally separate and transient. All P3 files are versioned, validated, written atomically and serially, and excluded from Git.
+The authoritative live workspace is stored in `data\wall-state.json`. It contains source URLs, queues, absolute timer timestamps, layout coordinates, display order, volume, mute state, title mode, active audio selection, stop/resume state, focus selection, overlays, appearance, and the Source Library. Named presets live in `data\wall-presets.json`, custom templates in `data\layout-templates.json`, and throttled VOD/playlist resume progress in `data\playback-progress.json`. Runtime health and dedicated-browser session records are intentionally separate and transient. All P4 files are versioned, validated, written atomically and serially, and excluded from Git.
 
 When an older state file is opened, LiveWall adds safe defaults for newer fields while preserving existing URLs, names, queues, timers, layouts, volume, mute, and audio selection. A failed migration leaves the original file untouched and prevents startup instead of replacing the wall with an empty state. Backups created before upgrades are kept under `data\backups`.
 
@@ -82,6 +84,10 @@ When an older state file is opened, LiveWall adds safe defaults for newer fields
 - Reset: stop LiveWall and delete `data\wall-state.json`. A clean file is created next time.
 
 No analytics are collected. Configuration, Source Library entries, backups, logs, and dedicated browser profiles stay in the local ignored `data` directory and are not part of the source repository. Video URLs are contacted directly by the browser only when needed for playback.
+
+### External TV setup
+
+On first use, choose **Watch on Wall** from a generic source. The dedicated External TV browser profile opens on the configured Wall display and may be used to sign in directly to a service. Its cookies and profile stay only in `data\launcher\browser-profiles\external-tv`, separate from your personal browser, Admin, and kiosk Wall profiles. To return, select **Return to Wall** in Admin or close that dedicated window. To sign out everywhere in that profile, close External TV, stop LiveWall, and delete only that `external-tv` profile folder; this does not affect personal Chrome/Edge data.
 
 ## Development
 

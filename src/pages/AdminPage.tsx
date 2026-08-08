@@ -116,6 +116,7 @@ export function SourceDialog({
   const [url, setUrl] = useState(initialUrl);
   const [titleMode, setTitleMode] = useState<'auto' | 'manual'>(initialTitleMode);
   const [saveToLibrary, setSaveToLibrary] = useState(kind === 'save');
+  const [embedProfile, setEmbedProfile] = useState(tile?.source.embedProfile ?? 'safe');
   const [startBehavior, setStartBehavior] = useState(initialPlayback.behavior);
   const [specificTime, setSpecificTime] = useState(
     initialPlayback.specificTime === undefined ? '' : formatTimestamp(initialPlayback.specificTime),
@@ -137,6 +138,7 @@ export function SourceDialog({
     name !== initialName ||
     url !== initialUrl ||
     titleMode !== initialTitleMode ||
+    embedProfile !== (tile?.source.embedProfile ?? 'safe') ||
     (kind !== 'save' && saveToLibrary) ||
     startBehavior !== initialPlayback.behavior ||
     specificTime !==
@@ -216,7 +218,25 @@ export function SourceDialog({
   async function submit(event: FormEvent) {
     event.preventDefault();
     try {
-      const source = kind === 'edit' || kind === 'save' ? tile!.source : detectSource(url);
+      const detected = kind === 'edit' || kind === 'save' ? tile!.source : detectSource(url);
+      if (
+        detected.type === 'website' &&
+        embedProfile === 'compatibility' &&
+        !detected.compatibilityConfirmed &&
+        !confirm(
+          'Compatibility Embed permits forms for this source. It still blocks popups and top navigation. Continue?',
+        )
+      )
+        return;
+      const source =
+        detected.type === 'website'
+          ? {
+              ...detected,
+              embedProfile,
+              compatibilityConfirmed: embedProfile === 'compatibility' || undefined,
+              embedReferrerPolicy: detected.embedReferrerPolicy ?? 'no-referrer',
+            }
+          : detected;
       setBusy(true);
       const finalName = await finalizeTitle(source, titleMode, name);
       const parsedSpecific =
@@ -367,6 +387,24 @@ export function SourceDialog({
           <p className="helper">
             Automatic YouTube titles are looked up once. You can always type a manual title instead.
           </p>
+          {proposed?.type === 'website' && (
+            <label>
+              Embed profile
+              <select
+                value={embedProfile}
+                onChange={(event) =>
+                  setEmbedProfile(event.target.value as 'safe' | 'compatibility' | 'external')
+                }
+              >
+                <option value="safe">Safe Embed</option>
+                <option value="compatibility">Compatibility Embed</option>
+                <option value="external">External Only</option>
+              </select>
+              <small>
+                Safe blocks popups and navigation. External Only uses the dedicated TV window.
+              </small>
+            </label>
+          )}
           <fieldset className="start-behavior">
             <legend>Start behavior</legend>
             <label>
@@ -452,6 +490,8 @@ function TileCard({
   onClearPosition,
   qualityPreference,
   onQualityPreference,
+  externalTvActive,
+  onWatchOnWall,
 }: {
   tile: Tile;
   isActiveAudio: boolean;
@@ -478,6 +518,8 @@ function TileCard({
   onClearPosition: () => Promise<unknown>;
   qualityPreference?: QualityPreference;
   onQualityPreference: (preference: QualityPreference) => Promise<unknown>;
+  externalTvActive: boolean;
+  onWatchOnWall: (url: string) => void;
 }) {
   const [queueUrl, setQueueUrl] = useState('');
   const [delay, setDelay] = useState(60);
@@ -718,6 +760,81 @@ function TileCard({
           <strong>Quality: Provider controlled.</strong>
         )}
       </div>
+      {tile.source.type === 'website' && (
+        <div className="embed-settings">
+          <strong>
+            {tile.source.embedProfile === 'external'
+              ? 'External Only'
+              : tile.source.embedProfile === 'compatibility'
+                ? 'Compatibility Embed'
+                : 'Safe Embed'}
+          </strong>
+          <small>
+            LiveWall can confirm the embedded page loaded, but many providers do not expose playback
+            state to another site.
+          </small>
+          <div>
+            <Button
+              variant="secondary"
+              disabled={tile.source.embedProfile === 'safe'}
+              onClick={() =>
+                void onSave((current) => ({
+                  ...current,
+                  source: {
+                    ...current.source,
+                    embedProfile: 'safe',
+                    compatibilityConfirmed: undefined,
+                    embedReferrerPolicy: 'no-referrer',
+                  },
+                }))
+              }
+            >
+              Safe Embed
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={tile.source.embedProfile === 'compatibility'}
+              onClick={() => {
+                if (
+                  !tile.source.compatibilityConfirmed &&
+                  !confirm(
+                    'Compatibility Embed permits forms for this source. It still blocks popups and top navigation. Continue?',
+                  )
+                )
+                  return;
+                void onSave((current) => ({
+                  ...current,
+                  source: {
+                    ...current.source,
+                    embedProfile: 'compatibility',
+                    compatibilityConfirmed: true,
+                  },
+                }));
+              }}
+            >
+              Try Compatibility
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() =>
+                void onSave((current) => ({
+                  ...current,
+                  source: { ...current.source, embedProfile: 'external' },
+                }))
+              }
+            >
+              External Only
+            </Button>
+            <Button
+              variant="primary"
+              disabled={externalTvActive}
+              onClick={() => onWatchOnWall(tile.source.url)}
+            >
+              Watch on Wall
+            </Button>
+          </div>
+        </div>
+      )}
       {tile.source.type === 'youtube-playlist' && (
         <div className="playlist-status">
           <strong>
@@ -956,6 +1073,11 @@ export function AdminPage() {
   const [draggedTileId, setDraggedTileId] = useState<string>();
   const [globalMessage, setGlobalMessage] = useState('');
   const [wallSessionStatus, setWallSessionStatus] = useState('checking');
+  const [externalTv, setExternalTv] = useState<{
+    phase: string;
+    message: string;
+    fallbackUsed?: boolean;
+  }>({ phase: 'wall-active', message: '' });
   const tiles = useMemo(() => orderedTiles(state.tiles), [state.tiles]);
   const appearance = normalizeAppearance(state.appearance);
   const overlayMode = normalizeOverlayMode(state.overlayMode);
@@ -1014,6 +1136,47 @@ export function AdminPage() {
       clearInterval(timer);
     };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    const refresh = () =>
+      fetch('/api/external-tv')
+        .then((response) => response.json())
+        .then((result) => active && setExternalTv(result))
+        .catch(
+          () =>
+            active &&
+            setExternalTv({ phase: 'failed', message: 'External TV status is unavailable.' }),
+        );
+    void refresh();
+    const timer = window.setInterval(refresh, 3_000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, []);
+
+  async function watchOnWall(url: string) {
+    try {
+      const response = await fetch('/api/external-tv/open', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ url }),
+      });
+      const result = await response.json();
+      setExternalTv(result);
+      if (!response.ok) throw new Error(result.message);
+      setGlobalMessage(result.message);
+    } catch (error) {
+      setGlobalMessage(error instanceof Error ? error.message : 'External TV could not be opened.');
+    }
+  }
+  async function returnToWall() {
+    const response = await fetch('/api/external-tv/return', { method: 'POST' });
+    const result = await response.json();
+    setExternalTv(result);
+    setGlobalMessage(result.message);
+  }
 
   async function controlDedicatedWall(action: 'close' | 'open') {
     if (
@@ -1126,6 +1289,18 @@ export function AdminPage() {
 
   return (
     <main className="admin-shell">
+      {externalTv.phase === 'external-active' && (
+        <div className="external-tv-banner" role="status">
+          <strong>External TV Mode is active.</strong>
+          <span>
+            Provider controls playback, volume, sign-in, and subscriptions in the dedicated TV
+            window.
+          </span>
+          <Button variant="primary" onClick={() => void returnToWall()}>
+            Return to Wall
+          </Button>
+        </div>
+      )}
       <aside className="sidebar">
         <a href="/admin" className="brand">
           <span>
@@ -1453,6 +1628,7 @@ export function AdminPage() {
           onFeedback={setGlobalMessage}
           collapsed={collapsedSections.library}
           onToggleCollapsed={() => toggleSection('library')}
+          onWatchOnWall={watchOnWall}
         />
         {state.tiles.length === 0 ? (
           <section className="admin-empty">
@@ -1554,6 +1730,8 @@ export function AdminPage() {
                       },
                     }))
                   }
+                  externalTvActive={externalTv.phase === 'external-active'}
+                  onWatchOnWall={watchOnWall}
                   onCommand={(name, value) => {
                     if (name === 'unmute') void setAudio(tile.id);
                     else {

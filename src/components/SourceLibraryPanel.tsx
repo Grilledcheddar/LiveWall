@@ -34,6 +34,7 @@ interface Props {
   onFeedback: (message: string) => void;
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
+  onWatchOnWall?: (url: string) => void;
 }
 
 export function SourceLibraryPanel({
@@ -44,6 +45,7 @@ export function SourceLibraryPanel({
   onFeedback,
   collapsed = false,
   onToggleCollapsed = () => undefined,
+  onWatchOnWall = () => undefined,
 }: Props) {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<LibraryFilter>('all');
@@ -523,6 +525,41 @@ export function SourceLibraryPanel({
                             ))}
                           </select>
                         </label>
+                        {entry.source.type === 'website' && (
+                          <label>
+                            Embed
+                            <select
+                              value={entry.source.embedProfile ?? 'safe'}
+                              onChange={(event) => {
+                                const profile = event.target.value as
+                                  'safe' | 'compatibility' | 'external';
+                                if (
+                                  profile === 'compatibility' &&
+                                  !confirm(
+                                    'Compatibility Embed permits forms for this source. It still blocks popups and top navigation. Continue?',
+                                  )
+                                )
+                                  return;
+                                void saveLibrary(
+                                  updateLibraryEntry(state.library, entry.id, {
+                                    source: {
+                                      ...entry.source,
+                                      embedProfile: profile,
+                                      compatibilityConfirmed:
+                                        profile === 'compatibility' || undefined,
+                                      embedReferrerPolicy:
+                                        entry.source.embedReferrerPolicy ?? 'no-referrer',
+                                    },
+                                  }),
+                                );
+                              }}
+                            >
+                              <option value="safe">Safe Embed</option>
+                              <option value="compatibility">Compatibility Embed</option>
+                              <option value="external">External Only</option>
+                            </select>
+                          </label>
+                        )}
                       </div>
                     )}
                     <div className="library-source-actions">
@@ -540,11 +577,22 @@ export function SourceLibraryPanel({
                       </Button>
                       <Button
                         variant="primary"
-                        disabled={state.tiles.length >= 9}
-                        title={state.tiles.length >= 9 ? 'The wall is full (9 of 9).' : ''}
+                        disabled={
+                          state.tiles.length >= 9 || entry.source.embedProfile === 'external'
+                        }
+                        title={
+                          entry.source.embedProfile === 'external'
+                            ? 'This source is External Only. Use Watch on Wall.'
+                            : state.tiles.length >= 9
+                              ? 'The wall is full (9 of 9).'
+                              : ''
+                        }
                         onClick={() => void addAsTile(entry)}
                       >
                         Add as Tile
+                      </Button>
+                      <Button variant="primary" onClick={() => onWatchOnWall(entry.originalUrl)}>
+                        Watch on Wall
                       </Button>
                       <Button
                         variant="secondary"

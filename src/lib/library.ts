@@ -25,7 +25,24 @@ function safeSource(
   if (!isRecord(value)) return undefined;
   const originalUrl = typeof value.originalUrl === 'string' ? value.originalUrl : '';
   try {
-    const source = detectSource(originalUrl);
+    const detected = detectSource(originalUrl);
+    const savedSource = isRecord(value.source) ? value.source : {};
+    const source: VideoSource =
+      detected.type === 'website'
+        ? {
+            ...detected,
+            embedProfile: ['safe', 'compatibility', 'external'].includes(
+              String(savedSource.embedProfile),
+            )
+              ? (savedSource.embedProfile as VideoSource['embedProfile'])
+              : 'safe',
+            compatibilityConfirmed: savedSource.compatibilityConfirmed === true || undefined,
+            embedReferrerPolicy:
+              savedSource.embedReferrerPolicy === 'strict-origin-when-cross-origin'
+                ? 'strict-origin-when-cross-origin'
+                : 'no-referrer',
+          }
+        : detected;
     return { source, originalUrl: source.url, canonicalUrl: canonicalSourceUrl(source) };
   } catch {
     return undefined;
@@ -252,7 +269,7 @@ export function setLibraryFavorite(
 export function updateLibraryEntry(
   library: SourceLibrary,
   entryId: string,
-  change: Pick<Partial<LibrarySource>, 'title' | 'titleMode' | 'folderId'>,
+  change: Pick<Partial<LibrarySource>, 'title' | 'titleMode' | 'folderId' | 'source'>,
   now = Date.now(),
 ): SourceLibrary {
   return normalizeSourceLibrary({

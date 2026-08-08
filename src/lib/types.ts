@@ -1,4 +1,6 @@
 export type SourceType = 'youtube' | 'youtube-playlist' | 'hls' | 'website' | 'mock';
+export type EmbedProfile = 'safe' | 'compatibility' | 'external';
+export type EmbedReferrerPolicy = 'no-referrer' | 'strict-origin-when-cross-origin';
 export type StartBehavior = 'live' | 'resume' | 'specific' | 'beginning';
 
 export interface PlaybackStart {
@@ -13,6 +15,12 @@ export interface VideoSource {
   playlistId?: string;
   playlistStartVideoId?: string;
   playlistStartIndex?: number;
+  /** Website-only; Safe Embed is the default. */
+  embedProfile?: EmbedProfile;
+  /** Website-only explicit acknowledgement for this canonical source/domain. */
+  compatibilityConfirmed?: boolean;
+  /** Website-only, intentionally opt-in. */
+  embedReferrerPolicy?: EmbedReferrerPolicy;
 }
 
 export interface Tile {
@@ -190,7 +198,7 @@ export interface WallPresetFile {
 }
 
 export interface WallState {
-  schemaVersion: 3;
+  schemaVersion: 4;
   version: number;
   updatedAt: number;
   layoutMode: 'automatic' | 'freeform' | 'template';

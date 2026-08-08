@@ -47,12 +47,15 @@ Describe 'LiveWall launcher configuration initialization' {
     $config.port | Should Be 4174
     $config.browser | Should Be 'chrome'
     $config.wallAutoplayWithSound | Should Be $true
+    $config.externalTvMonitor | Should Be '\\.\DISPLAY2'
+    $config.externalTvProfileDir | Should Be 'data\launcher\browser-profiles\external-tv'
+    $config.externalTvFullscreen | Should Be $true
     (Test-Path -LiteralPath "$local.tmp") | Should Be $false
   }
 
   It 'preserves an existing Wall autoplay choice on warm runs' {
     $local = Join-Path $TestDrive 'warm-launcher.json'
-    '{"port":4174,"wallAutoplayWithSound":false}' | Set-Content -LiteralPath $local -Encoding UTF8
+    '{"port":4174,"wallAutoplayWithSound":false,"externalTvMonitor":"\\\\.\\DISPLAY2","externalTvProfileDir":"data\\launcher\\browser-profiles\\external-tv","externalTvFullscreen":true}' | Set-Content -LiteralPath $local -Encoding UTF8
     $before = Get-Content -LiteralPath $local -Raw
     (Update-LiveWallLauncherConfig -ConfigPath $local) | Should Be $false
     (Get-Content -LiteralPath $local -Raw) | Should Be $before
@@ -116,6 +119,14 @@ Describe 'LiveWall browser discovery and arguments' {
       -Url 'http://127.0.0.1:4174/admin'
     ($wall -contains '--autoplay-policy=no-user-gesture-required') | Should Be $true
     ($admin -contains '--autoplay-policy=no-user-gesture-required') | Should Be $false
+  }
+
+  It 'uses an isolated persistent External TV profile without kiosk restrictions' {
+    $screen = New-TestScreen '\\.\DISPLAY2' $false -720 -2160 1920 1080 -720 -2160 1920 1040
+    $args = New-LiveWallExternalTvArguments -Screen $screen -ProfilePath 'C:\LiveWall\data\launcher\browser-profiles\external-tv' -Url 'https://provider.example/watch' -Fullscreen $true
+    ($args -join ' ') | Should Match '--user-data-dir='
+    ($args -join ' ') | Should Match '--start-fullscreen'
+    ($args -join ' ') | Should Not Match '--kiosk'
   }
 }
 

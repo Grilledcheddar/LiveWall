@@ -1662,6 +1662,39 @@ a {
 .quality-settings small {
   color: #b8c4d1;
 }
+.embed-settings,
+.external-tv-banner {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid #40536a;
+  border-radius: 8px;
+  background: #0c141d;
+}
+.embed-settings small,
+.external-tv-banner span {
+  color: #b8c4d1;
+}
+.embed-settings > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.external-tv-banner {
+  margin: 16px 32px 0;
+}
+.external-tv-suspended {
+  display: grid;
+  place-content: center;
+  min-height: 100vh;
+  padding: 30px;
+  text-align: center;
+  color: #f1f5fa;
+  background: #07101a;
+}
 .section-visibility-actions {
   display: flex;
   gap: 6px;

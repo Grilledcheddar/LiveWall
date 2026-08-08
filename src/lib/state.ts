@@ -10,6 +10,7 @@ import { emptyLibrary, normalizeSourceLibrary, recordLibraryUse } from './librar
 import { normalizeFreeformLayout, normalizeLayoutSlots } from './layouts.js';
 import { defaultStartBehavior, normalizePlaybackStart } from './playback.js';
 import { normalizeQualityPreferences } from './quality.js';
+import { detectSource } from './sources.js';
 
 export const DEFAULT_APPEARANCE: Readonly<WallAppearance> = Object.freeze({
   backgroundColor: '#020305',
@@ -21,7 +22,7 @@ export const DEFAULT_APPEARANCE: Readonly<WallAppearance> = Object.freeze({
 });
 
 export const emptyState = (): WallState => ({
-  schemaVersion: 3,
+  schemaVersion: 4,
   version: 0,
   updatedAt: Date.now(),
   layoutMode: 'automatic',
@@ -96,8 +97,14 @@ function normalizeVideoSource(value: unknown, label: string): VideoSource {
     throw new Error(`${label} is missing its YouTube video ID.`);
   if (type === 'youtube-playlist' && typeof value.playlistId !== 'string')
     throw new Error(`${label} is missing its YouTube playlist ID.`);
+  let detected: VideoSource;
+  try {
+    detected = detectSource(value.url);
+  } catch {
+    throw new Error(`${label} has an unsafe URL.`);
+  }
   return {
-    url: value.url,
+    url: detected.url,
     type: type as VideoSource['type'],
     youtubeId: type === 'youtube' ? String(value.youtubeId) : undefined,
     playlistId: type === 'youtube-playlist' ? String(value.playlistId) : undefined,
@@ -112,6 +119,21 @@ function normalizeVideoSource(value: unknown, label: string): VideoSource {
       value.playlistStartIndex >= 0
         ? value.playlistStartIndex
         : undefined,
+    embedProfile:
+      type === 'website' &&
+      ['safe', 'compatibility', 'external'].includes(String(value.embedProfile))
+        ? (value.embedProfile as VideoSource['embedProfile'])
+        : type === 'website'
+          ? 'safe'
+          : undefined,
+    compatibilityConfirmed:
+      type === 'website' && value.compatibilityConfirmed === true ? true : undefined,
+    embedReferrerPolicy:
+      type === 'website' && value.embedReferrerPolicy === 'strict-origin-when-cross-origin'
+        ? 'strict-origin-when-cross-origin'
+        : type === 'website'
+          ? 'no-referrer'
+          : undefined,
   };
 }
 
@@ -178,7 +200,7 @@ export function normalizeWallState(input: unknown): WallState {
   const tileIds = new Set(tiles.map((tile) => tile.id));
   return {
     ...input,
-    schemaVersion: 3,
+    schemaVersion: 4,
     version:
       typeof input.version === 'number' && Number.isFinite(input.version) ? input.version : 0,
     updatedAt:

@@ -15,6 +15,7 @@ import { StateStore } from './state-store.js';
 import { fetchYouTubeTitle } from './youtube-title.js';
 import { exportLibrary } from '../src/lib/library.js';
 import { WallSessionService } from './wall-session.js';
+import { ExternalTvService } from './external-tv.js';
 import { AtomicJsonStore } from './p3-store.js';
 import { normalizePlaybackProgress, playbackKey } from '../src/lib/playback.js';
 import { normalizeLayoutTemplates } from '../src/lib/layouts.js';
@@ -45,6 +46,7 @@ const presetsStore = new AtomicJsonStore<WallPresetFile>(
   normalizeWallPresets,
 );
 const wallSession = new WallSessionService(root);
+const externalTv = new ExternalTvService(root);
 let stateLoadError = '';
 try {
   await store.load();
@@ -280,6 +282,31 @@ app.get('/api/wall-session', async (_req, res) => {
       Status: 'error',
       Message: 'The dedicated Wall status could not be checked.',
     });
+  }
+});
+app.get('/api/external-tv', async (_req, res) => {
+  try {
+    res.json(await externalTv.refresh());
+  } catch {
+    res.status(503).json({ phase: 'failed', message: 'External TV status is unavailable.' });
+  }
+});
+app.post('/api/external-tv/open', async (req, res) => {
+  try {
+    const result = await externalTv.open(String(req.body?.url ?? ''));
+    res.status(result.phase === 'failed' ? 422 : 200).json(result);
+  } catch (error) {
+    res.status(400).json({
+      phase: 'failed',
+      message: error instanceof Error ? error.message : 'External TV URL was invalid.',
+    });
+  }
+});
+app.post('/api/external-tv/return', async (_req, res) => {
+  try {
+    res.json(await externalTv.restore());
+  } catch {
+    res.status(503).json({ phase: 'failed', message: 'External TV could not be restored.' });
   }
 });
 

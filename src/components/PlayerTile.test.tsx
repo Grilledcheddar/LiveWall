@@ -1,4 +1,4 @@
-import { act, cleanup, render, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { newTile } from '../lib/state';
@@ -17,6 +17,44 @@ afterEach(() => {
 });
 
 describe('PlayerTile lifecycle', () => {
+  it('uses exact Safe Embed iframe restrictions and never treats page load as video playback', () => {
+    const tile = newTile('Website', {
+      type: 'website',
+      url: 'https://example.com',
+      embedProfile: 'safe',
+    });
+    const health: PlayerHealth[] = [];
+    const view = render(<PlayerTile tile={tile} onHealth={(value) => health.push(value)} />);
+    const frame = view.container.querySelector('iframe')!;
+    expect(frame.allow).toBe('autoplay; fullscreen; picture-in-picture; encrypted-media');
+    expect(frame.allowFullscreen).toBe(true);
+    expect(frame.referrerPolicy).toBe('no-referrer');
+    expect(frame.getAttribute('sandbox')).toBe(
+      'allow-scripts allow-same-origin allow-presentation',
+    );
+    fireEvent.load(frame);
+    expect(health.at(-1)?.message).toBe(
+      'Embedded page loaded; provider playback state is unavailable.',
+    );
+  });
+
+  it('adds only forms for Compatibility Embed and never mounts External Only sources', () => {
+    const tile = newTile('Website', {
+      type: 'website',
+      url: 'https://example.com',
+      embedProfile: 'compatibility',
+      compatibilityConfirmed: true,
+    });
+    const view = render(<PlayerTile tile={tile} />);
+    expect(view.container.querySelector('iframe')?.getAttribute('sandbox')).toBe(
+      'allow-scripts allow-same-origin allow-presentation allow-forms',
+    );
+    view.rerender(
+      <PlayerTile tile={{ ...tile, source: { ...tile.source, embedProfile: 'external' } }} />,
+    );
+    expect(view.container.querySelector('iframe')).toBeNull();
+    expect(view.container.textContent).toContain('External Only source');
+  });
   it('contains none of the unsupported YouTube quality APIs', () => {
     const sourceCode = readFileSync('src/components/PlayerTile.tsx', 'utf8');
     for (const unsupported of [

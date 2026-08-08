@@ -30,6 +30,7 @@ export function WallPage() {
   const [controlsVisible, setControlsVisible] = useState(true);
   const [fullscreen, setFullscreen] = useState(Boolean(document.fullscreenElement));
   const [fullscreenError, setFullscreenError] = useState('');
+  const [externalTvActive, setExternalTvActive] = useState(false);
   const audioActivationRequired = Object.values(healthByTile).some(
     (health) => health.audioActivationRequired,
   );
@@ -68,6 +69,21 @@ export function WallPage() {
     document.addEventListener('keydown', escapeFocus);
     return () => document.removeEventListener('keydown', escapeFocus);
   }, [save, state.focusedTileId]);
+
+  useEffect(() => {
+    let mounted = true;
+    const refresh = () =>
+      fetch('/api/external-tv')
+        .then((response) => response.json())
+        .then((result) => mounted && setExternalTvActive(result.phase === 'external-active'))
+        .catch(() => undefined);
+    void refresh();
+    const timer = window.setInterval(refresh, 2_000);
+    return () => {
+      mounted = false;
+      clearInterval(timer);
+    };
+  }, []);
 
   async function toggleFullscreen() {
     setFullscreenError('');
@@ -132,7 +148,19 @@ export function WallPage() {
             {fullscreenError}
           </div>
         )}
-        {!tiles.length ? (
+        {externalTvActive ? (
+          <div className="external-tv-suspended" role="status">
+            <div className="wall-brand">
+              <Radio />
+              <span>LIVEWALL</span>
+            </div>
+            <h1>External TV Mode is active.</h1>
+            <p>
+              The dedicated TV window controls this provider. The Wall will restore automatically
+              when it closes.
+            </p>
+          </div>
+        ) : !tiles.length ? (
           <div className="empty-wall-content">
             <div className="wall-brand">
               <Radio />

@@ -45,6 +45,53 @@ test('production routes migrate the actual pre-P1 state without a blank page', a
   await context.close();
 });
 
+test('P4 generic embed profiles are exact and External TV suspends then restores the Wall', async ({
+  browser,
+  request,
+}) => {
+  const genericState = structuredClone(legacyState) as typeof legacyState & {
+    tiles: Array<Record<string, unknown>>;
+  };
+  genericState.tiles[0] = {
+    ...genericState.tiles[0],
+    source: { type: 'website', url: 'https://example.com/embed', title: 'Example provider' },
+    title: 'Example provider',
+  };
+  expect((await request.put('/api/state', { data: genericState })).ok()).toBeTruthy();
+
+  const context = await browser.newContext();
+  const admin = await context.newPage();
+  const wall = await context.newPage();
+  await Promise.all([admin.goto('/admin'), wall.goto('/wall')]);
+  const iframe = wall.locator('iframe').first();
+  await expect(iframe).toHaveAttribute(
+    'allow',
+    'autoplay; fullscreen; picture-in-picture; encrypted-media',
+  );
+  await expect(iframe).toHaveAttribute(
+    'sandbox',
+    'allow-scripts allow-same-origin allow-presentation',
+  );
+  await expect(iframe).toHaveAttribute('referrerpolicy', 'no-referrer');
+  await expect(iframe).toHaveAttribute('allowfullscreen', '');
+
+  const card = admin.locator('[data-testid="admin-tile"]').first();
+  admin.once('dialog', (dialog) => dialog.accept());
+  await card.getByRole('button', { name: 'Try Compatibility' }).click();
+  await expect(wall.locator('iframe').first()).toHaveAttribute(
+    'sandbox',
+    'allow-scripts allow-same-origin allow-presentation allow-forms',
+  );
+  await card.getByRole('button', { name: 'External Only' }).click();
+  await expect(wall.getByRole('heading', { name: 'External TV Mode is active.' })).toHaveCount(0);
+  await card.getByRole('button', { name: 'Watch on Wall' }).click();
+  await expect(admin.getByText('External TV Mode is active.')).toBeVisible();
+  await expect(wall.getByRole('heading', { name: 'External TV Mode is active.' })).toBeVisible();
+  await admin.getByRole('button', { name: 'Return to Wall' }).click();
+  await expect(wall.locator('.player-tile')).toHaveCount(2);
+  await context.close();
+});
+
 test('title overlays honor Off, On hover, and Always visible modes', async ({
   browser,
   request,

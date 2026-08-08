@@ -19,12 +19,114 @@ function Initialize-LiveWallLauncherConfig {
 function Update-LiveWallLauncherConfig {
   param([Parameter(Mandatory = $true)][string]$ConfigPath)
   $config = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
-  if ($config.PSObject.Properties.Name -contains 'wallAutoplayWithSound') { return $false }
-  $config | Add-Member -NotePropertyName wallAutoplayWithSound -NotePropertyValue $true
+  $changed = $false
+  if (-not ($config.PSObject.Properties.Name -contains 'wallAutoplayWithSound')) {
+    $config | Add-Member -NotePropertyName wallAutoplayWithSound -NotePropertyValue $true
+    $changed = $true
+  }
+  if (-not ($config.PSObject.Properties.Name -contains 'externalTvMonitor')) {
+    $monitor = if ($config.PSObject.Properties.Name -contains 'wallDisplay') { [string]$config.wallDisplay } else { '\\.\DISPLAY2' }
+    $config | Add-Member -NotePropertyName externalTvMonitor -NotePropertyValue $monitor
+    $changed = $true
+  }
+  if (-not ($config.PSObject.Properties.Name -contains 'externalTvProfileDir')) {
+    $config | Add-Member -NotePropertyName externalTvProfileDir -NotePropertyValue 'data\launcher\browser-profiles\external-tv'
+    $changed = $true
+  }
+  if (-not ($config.PSObject.Properties.Name -contains 'externalTvFullscreen')) {
+    $config | Add-Member -NotePropertyName externalTvFullscreen -NotePropertyValue $true
+    $changed = $true
+  }
+  if (-not $changed) { return $false }
   $tempPath = "$ConfigPath.tmp"
   $config | ConvertTo-Json | Set-Content -LiteralPath $tempPath -Encoding UTF8
   Move-Item -LiteralPath $tempPath -Destination $ConfigPath -Force
   $true
+}
+
+function Get-LiveWallExternalTvSessionPath {
+  param([Parameter(Mandatory = $true)][string]$Root)
+  Join-Path $Root 'data\launcher\external-tv-session.json'
+}
+
+function Get-LiveWallExternalTvContext {
+  param([Parameter(Mandatory = $true)][string]$Root)
+  $wall = Get-LiveWallWallContext -Root $Root
+  $configured = [string]$wall.Config.externalTvProfileDir
+  if ([IO.Path]::IsPathRooted($configured)) { throw 'externalTvProfileDir must be relative to the LiveWall installation.' }
+  $rootPath = [IO.Path]::GetFullPath($Root).TrimEnd('\')
+  $profile = [IO.Path]::GetFullPath((Join-Path $rootPath $configured))
+  if (-not $profile.StartsWith($rootPath + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'externalTvProfileDir must remain inside the LiveWall installation.' }
+  [pscustomobject]@{ Config = $wall.Config; Browser = $wall.Browser; ProfilePath = $profile; Monitor = [string]$wall.Config.externalTvMonitor }
+}
+
+function New-LiveWallExternalTvArguments {
+  param([Parameter(Mandatory = $true)]$Screen,[Parameter(Mandatory = $true)][string]$ProfilePath,[Parameter(Mandatory = $true)][string]$Url,[bool]$Fullscreen = $true)
+  $arguments = @("--user-data-dir=`"$ProfilePath`"",'--no-first-run','--no-default-browser-check','--disable-background-mode','--new-window',"--window-position=$($Screen.Bounds.X),$($Screen.Bounds.Y)","--window-size=$($Screen.Bounds.Width),$($Screen.Bounds.Height)")
+  if ($Fullscreen) { $arguments += '--start-fullscreen' }
+  $arguments + $Url
+}
+
+function Save-LiveWallExternalTvSession {
+  param([Parameter(Mandatory = $true)][string]$Root,[Parameter(Mandatory = $true)][int]$ProcessId,[Parameter(Mandatory = $true)][string]$BrowserPath,[Parameter(Mandatory = $true)][string]$ProfilePath,[Parameter(Mandatory = $true)][string]$Url,[string]$Status = 'open')
+  $path = Get-LiveWallExternalTvSessionPath -Root $Root
+  New-Item -ItemType Directory -Path (Split-Path $path -Parent) -Force | Out-Null
+  $record = [ordered]@{ version = 1; processId = $ProcessId; browserPath = [IO.Path]::GetFullPath($BrowserPath); profilePath = [IO.Path]::GetFullPath($ProfilePath).TrimEnd('\'); url = $Url; status = $Status; updatedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() }
+  $temp = "$path.tmp"
+  $record | ConvertTo-Json | Set-Content -LiteralPath $temp -Encoding UTF8
+  Move-Item -LiteralPath $temp -Destination $path -Force
+  [pscustomobject]$record
+}
+
+function Test-LiveWallExternalTvSession {
+  param([Parameter(Mandatory = $true)]$Session,[Parameter(Mandatory = $true)][string]$ExpectedBrowserPath,[Parameter(Mandatory = $true)][string]$ExpectedProfilePath,$Process)
+  if ($Session.status -eq 'closed') { return [pscustomobject]@{ Valid = $false; Status = 'already-closed'; Message = 'The dedicated External TV session is closed.' } }
+  if (-not $Process) { return [pscustomobject]@{ Valid = $false; Status = 'stale'; Message = 'The dedicated External TV process is no longer running.' } }
+  $browser = [IO.Path]::GetFullPath($ExpectedBrowserPath); $profile = [IO.Path]::GetFullPath($ExpectedProfilePath).TrimEnd('\')
+  $profileArgument = '--user-data-dir=(?:")?' + [regex]::Escape($profile) + '(?:")?(?:\s|$)'
+  $valid = $Process.ExecutablePath -and ([IO.Path]::GetFullPath([string]$Process.ExecutablePath) -ieq $browser) -and [int]$Session.processId -eq [int]$Process.ProcessId -and [string]$Session.profilePath -ieq $profile -and $Process.CommandLine -match $profileArgument -and ([string]$Process.CommandLine).IndexOf([string]$Session.url,[StringComparison]::OrdinalIgnoreCase) -ge 0
+  if (-not $valid) { return [pscustomobject]@{ Valid = $false; Status = 'mismatch'; Message = 'The registered External TV process did not match its executable, profile, and URL. Nothing was closed.' } }
+  [pscustomobject]@{ Valid = $true; Status = 'open'; Message = 'The dedicated External TV process is valid.' }
+}
+
+function Get-LiveWallExternalTvStatus {
+  param([Parameter(Mandatory = $true)][string]$Root)
+  $path = Get-LiveWallExternalTvSessionPath -Root $Root
+  if (-not (Test-Path -LiteralPath $path)) { return [pscustomobject]@{ Ok = $true; Status = 'closed'; Message = 'External TV is not active.' } }
+  $session = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+  $context = Get-LiveWallExternalTvContext -Root $Root
+  $process = Get-CimInstance Win32_Process -Filter "ProcessId = $([int]$session.processId)" -ErrorAction SilentlyContinue
+  $test = Test-LiveWallExternalTvSession -Session $session -ExpectedBrowserPath $context.Browser.Path -ExpectedProfilePath $context.ProfilePath -Process $process
+  if ($test.Valid) { return [pscustomobject]@{ Ok = $true; Status = 'active'; Message = 'External TV is active.'; Url = $session.url; ProcessId = $session.processId } }
+  if ($test.Status -eq 'stale') { [void](Save-LiveWallExternalTvSession -Root $Root -ProcessId ([int]$session.processId) -BrowserPath $context.Browser.Path -ProfilePath $context.ProfilePath -Url $session.url -Status 'closed'); return [pscustomobject]@{ Ok = $true; Status = 'closed'; Message = 'External TV closed; LiveWall can be restored.' } }
+  [pscustomobject]@{ Ok = $false; Status = $test.Status; Message = $test.Message }
+}
+
+function Open-LiveWallExternalTv {
+  param([Parameter(Mandatory = $true)][string]$Root,[Parameter(Mandatory = $true)][string]$Url)
+  if ($Url -notmatch '^https?://') { throw 'External TV accepts only http:// or https:// URLs.' }
+  $existing = Get-LiveWallExternalTvStatus -Root $Root
+  if ($existing.Status -eq 'active') { return [pscustomobject]@{ Ok = $true; Status = 'already-active'; Message = 'External TV is already active.'; ProcessId = $existing.ProcessId } }
+  $context = Get-LiveWallExternalTvContext -Root $Root; $selection = Select-LiveWallDisplay -Screens @(Get-LiveWallScreens) -RequestedDeviceName $context.Monitor
+  New-Item -ItemType Directory -Path $context.ProfilePath -Force | Out-Null
+  $arguments = New-LiveWallExternalTvArguments -Screen $selection.Screen -ProfilePath $context.ProfilePath -Url $Url -Fullscreen ([bool]$context.Config.externalTvFullscreen)
+  $process = Start-Process -FilePath $context.Browser.Path -ArgumentList $arguments -PassThru
+  [void](Save-LiveWallExternalTvSession -Root $Root -ProcessId $process.Id -BrowserPath $context.Browser.Path -ProfilePath $context.ProfilePath -Url $Url)
+  [pscustomobject]@{ Ok = $true; Status = 'opened'; Message = "External TV opened on $($selection.Screen.DeviceName)."; ProcessId = $process.Id; Display = $selection.Screen.DeviceName; FallbackUsed = $selection.FallbackUsed }
+}
+
+function Close-LiveWallExternalTv {
+  param([Parameter(Mandatory = $true)][string]$Root)
+  $path = Get-LiveWallExternalTvSessionPath -Root $Root
+  if (-not (Test-Path -LiteralPath $path)) { return [pscustomobject]@{ Ok = $true; Status = 'already-closed'; Message = 'External TV is already closed.' } }
+  $session = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json; $context = Get-LiveWallExternalTvContext -Root $Root
+  $process = Get-CimInstance Win32_Process -Filter "ProcessId = $([int]$session.processId)" -ErrorAction SilentlyContinue
+  $test = Test-LiveWallExternalTvSession -Session $session -ExpectedBrowserPath $context.Browser.Path -ExpectedProfilePath $context.ProfilePath -Process $process
+  if ($test.Status -eq 'already-closed') { return [pscustomobject]@{ Ok = $true; Status = 'already-closed'; Message = 'External TV is already closed.' } }
+  if (-not $test.Valid) { return [pscustomobject]@{ Ok = $false; Status = $test.Status; Message = $test.Message } }
+  Stop-Process -Id $process.ProcessId -ErrorAction SilentlyContinue
+  [void](Save-LiveWallExternalTvSession -Root $Root -ProcessId ([int]$session.processId) -BrowserPath $context.Browser.Path -ProfilePath $context.ProfilePath -Url $session.url -Status 'closed')
+  [pscustomobject]@{ Ok = $true; Status = 'closed'; Message = 'External TV closed.' }
 }
 
 function Set-LiveWallDpiAwareness {

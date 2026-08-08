@@ -807,13 +807,38 @@ export const PlayerTile = memo(function PlayerTile({
       applyStartBehavior();
       applyPendingControls();
     } else {
+      if (tile.source.embedProfile === 'external') {
+        publish(
+          'unsupported',
+          'External Only source. Use Watch on Wall to open it in the dedicated TV window.',
+        );
+        adapter.current = emptyAdapter;
+        adapterReady.current = true;
+        applyPendingControls();
+        return () => {
+          adapter.current = undefined;
+          adapterReady.current = false;
+          node.replaceChildren();
+        };
+      }
       const frame = document.createElement('iframe');
       frame.src = tile.source.url;
-      frame.allow = 'autoplay; fullscreen; picture-in-picture';
-      frame.referrerPolicy = 'strict-origin-when-cross-origin';
+      const compatibility = tile.source.embedProfile === 'compatibility';
+      frame.allow = 'autoplay; fullscreen; picture-in-picture; encrypted-media';
+      frame.allowFullscreen = true;
+      frame.referrerPolicy =
+        tile.source.embedReferrerPolicy === 'strict-origin-when-cross-origin'
+          ? 'strict-origin-when-cross-origin'
+          : 'no-referrer';
+      frame.setAttribute(
+        'sandbox',
+        compatibility
+          ? 'allow-scripts allow-same-origin allow-presentation allow-forms'
+          : 'allow-scripts allow-same-origin allow-presentation',
+      );
       frame.title = latestName.current;
       frame.onload = () =>
-        publish('unknown', 'Loaded; playback state is unavailable for this provider.');
+        publish('unknown', 'Embedded page loaded; provider playback state is unavailable.');
       node.appendChild(frame);
       timeout = window.setTimeout(
         () => publish('unsupported', 'The provider may block embedding.'),
@@ -846,6 +871,8 @@ export const PlayerTile = memo(function PlayerTile({
     tile.source.playlistId,
     tile.source.playlistStartIndex,
     tile.source.playlistStartVideoId,
+    tile.source.embedProfile,
+    tile.source.embedReferrerPolicy,
     tile.playlistIndex,
     tile.resumePosition,
   ]);

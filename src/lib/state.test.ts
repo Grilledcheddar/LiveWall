@@ -42,6 +42,29 @@ describe('automatic layouts', () => {
 });
 
 describe('state rules', () => {
+  it('migrates website embed profiles safely without changing tile identity', () => {
+    const existing = newTile('Website', { type: 'website', url: 'https://example.com' });
+    const safe = normalizeWallState({ ...emptyState(), tiles: [existing] });
+    expect(safe.tiles[0].id).toBe(existing.id);
+    expect(safe.tiles[0].source).toMatchObject({
+      embedProfile: 'safe',
+      embedReferrerPolicy: 'no-referrer',
+    });
+    const compatibility = normalizeWallState({
+      ...safe,
+      tiles: [
+        {
+          ...safe.tiles[0],
+          source: {
+            ...safe.tiles[0].source,
+            embedProfile: 'compatibility',
+            compatibilityConfirmed: true,
+          },
+        },
+      ],
+    });
+    expect(compatibility.tiles[0].source.embedProfile).toBe('compatibility');
+  });
   it('recovers an expired queued replacement after reload', () => {
     const tile = { ...newTile('A', source('old')), queuedSource: source('new'), scheduledAt: 100 };
     const result = reconcileTimers({ ...emptyState(), tiles: [tile] }, 101);
