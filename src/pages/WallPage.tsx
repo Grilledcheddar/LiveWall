@@ -187,6 +187,9 @@ export function WallPage() {
               The dedicated TV window controls this provider. The Wall will restore automatically
               when it closes.
             </p>
+            <Button variant="primary" className="external-tv-suspended-return" onClick={() => void returnToWall()}>
+              <MonitorX size={16} /> <span>Return to Wall</span>
+            </Button>
           </div>
         ) : !tiles.length ? (
           <div className="empty-wall-content">
@@ -237,39 +240,25 @@ export function WallPage() {
                 >
                   <Focus size={15} />
                 </Button>
-                {tile.source.embedProfile === 'external' &&
-                  (() => {
-                    const isThisTileActive =
-                      externalTv.phase === 'external-active' && externalTv.url === tile.source.url;
-                    const isBusy =
-                      externalTv.phase === 'preparing' || externalTv.phase === 'restoring';
-                    const isBlockedByOther = externalTvActive && !isThisTileActive;
-                    return (
-                      <Button
-                        variant={isThisTileActive ? 'primary' : 'secondary'}
-                        className="tile-external-tv-button"
-                        disabled={isBusy || isBlockedByOther}
-                        aria-label={
-                          isThisTileActive
-                            ? `Return ${tile.name} to the Wall`
-                            : `Watch ${tile.name} in External TV Mode`
-                        }
-                        onClick={() =>
-                          void (isThisTileActive ? returnToWall() : watchExternal(tile.source.url))
-                        }
-                      >
-                        {isThisTileActive ? (
-                          <>
-                            <MonitorX size={15} /> <span>Return to Wall</span>
-                          </>
-                        ) : (
-                          <>
-                            <Tv size={15} /> <span>{isBusy ? 'Please wait…' : 'Watch External'}</span>
-                          </>
-                        )}
-                      </Button>
-                    );
-                  })()}
+                {tile.source.embedProfile === 'external' && (
+                  // externalTvActive is always false on this branch: an active session
+                  // suspends the whole Wall (see the external-tv-suspended screen above),
+                  // which is where its own Return to Wall control lives.
+                  <Button
+                    variant="secondary"
+                    className="tile-external-tv-button"
+                    disabled={externalTv.phase === 'preparing' || externalTv.phase === 'restoring'}
+                    aria-label={`Watch ${tile.name} in External TV Mode`}
+                    onClick={() => void watchExternal(tile.source.url)}
+                  >
+                    <Tv size={15} />
+                    <span>
+                      {externalTv.phase === 'preparing' || externalTv.phase === 'restoring'
+                        ? 'Please wait…'
+                        : 'Watch External'}
+                    </span>
+                  </Button>
+                )}
               </div>
             ))}
           </GridLayout>

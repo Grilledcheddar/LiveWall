@@ -962,12 +962,14 @@ a {
   opacity: 0;
 }
 .wall-tile-host:hover .tile-external-tv-button,
-.tile-external-tv-button:focus-visible,
-.tile-external-tv-button.lw-button--primary {
+.tile-external-tv-button:focus-visible {
   opacity: 1;
 }
 .focus-mode .wall-tile-host.unfocused .tile-external-tv-button {
   display: none;
+}
+.external-tv-suspended-return {
+  margin-top: 18px;
 }
 .player-mount,
 .player-mount iframe,
