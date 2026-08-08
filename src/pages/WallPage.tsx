@@ -1,4 +1,4 @@
-import { Focus, Maximize, Minimize, Radio, Volume2, X } from 'lucide-react';
+import { Focus, Maximize, Minimize, MonitorX, Radio, Tv, Volume2, X } from 'lucide-react';
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import GridLayout from 'react-grid-layout';
@@ -30,7 +30,11 @@ export function WallPage() {
   const [controlsVisible, setControlsVisible] = useState(true);
   const [fullscreen, setFullscreen] = useState(Boolean(document.fullscreenElement));
   const [fullscreenError, setFullscreenError] = useState('');
-  const [externalTvActive, setExternalTvActive] = useState(false);
+  const [externalTv, setExternalTv] = useState<{ phase: string; message: string; url?: string }>({
+    phase: 'wall-active',
+    message: '',
+  });
+  const externalTvActive = externalTv.phase === 'external-active';
   const audioActivationRequired = Object.values(healthByTile).some(
     (health) => health.audioActivationRequired,
   );
@@ -75,7 +79,7 @@ export function WallPage() {
     const refresh = () =>
       fetch('/api/external-tv')
         .then((response) => response.json())
-        .then((result) => mounted && setExternalTvActive(result.phase === 'external-active'))
+        .then((result) => mounted && setExternalTv(result))
         .catch(() => undefined);
     void refresh();
     const timer = window.setInterval(refresh, 2_000);
@@ -84,6 +88,30 @@ export function WallPage() {
       clearInterval(timer);
     };
   }, []);
+
+  async function watchExternal(url: string) {
+    try {
+      const response = await fetch('/api/external-tv/open', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ url }),
+      });
+      const result = await response.json();
+      setExternalTv(result);
+    } catch {
+      // The next poll of /api/external-tv reconciles the tile control with reality.
+    }
+  }
+
+  async function returnToWall() {
+    try {
+      const response = await fetch('/api/external-tv/return', { method: 'POST' });
+      const result = await response.json();
+      setExternalTv(result);
+    } catch {
+      // The next poll of /api/external-tv reconciles the tile control with reality.
+    }
+  }
 
   async function toggleFullscreen() {
     setFullscreenError('');
@@ -209,6 +237,39 @@ export function WallPage() {
                 >
                   <Focus size={15} />
                 </Button>
+                {tile.source.embedProfile === 'external' &&
+                  (() => {
+                    const isThisTileActive =
+                      externalTv.phase === 'external-active' && externalTv.url === tile.source.url;
+                    const isBusy =
+                      externalTv.phase === 'preparing' || externalTv.phase === 'restoring';
+                    const isBlockedByOther = externalTvActive && !isThisTileActive;
+                    return (
+                      <Button
+                        variant={isThisTileActive ? 'primary' : 'secondary'}
+                        className="tile-external-tv-button"
+                        disabled={isBusy || isBlockedByOther}
+                        aria-label={
+                          isThisTileActive
+                            ? `Return ${tile.name} to the Wall`
+                            : `Watch ${tile.name} in External TV Mode`
+                        }
+                        onClick={() =>
+                          void (isThisTileActive ? returnToWall() : watchExternal(tile.source.url))
+                        }
+                      >
+                        {isThisTileActive ? (
+                          <>
+                            <MonitorX size={15} /> <span>Return to Wall</span>
+                          </>
+                        ) : (
+                          <>
+                            <Tv size={15} /> <span>{isBusy ? 'Please wait…' : 'Watch External'}</span>
+                          </>
+                        )}
+                      </Button>
+                    );
+                  })()}
               </div>
             ))}
           </GridLayout>

@@ -949,6 +949,26 @@ a {
 .focus-mode .tile-focus-button {
   display: none;
 }
+.tile-external-tv-button {
+  position: absolute;
+  z-index: 7;
+  bottom: 10px;
+  left: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  opacity: 0;
+}
+.wall-tile-host:hover .tile-external-tv-button,
+.tile-external-tv-button:focus-visible,
+.tile-external-tv-button.lw-button--primary {
+  opacity: 1;
+}
+.focus-mode .wall-tile-host.unfocused .tile-external-tv-button {
+  display: none;
+}
 .player-mount,
 .player-mount iframe,
 .player-mount video {
