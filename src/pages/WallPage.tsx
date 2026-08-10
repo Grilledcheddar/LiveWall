@@ -187,7 +187,11 @@ export function WallPage() {
               The dedicated TV window controls this provider. The Wall will restore automatically
               when it closes.
             </p>
-            <Button variant="primary" className="external-tv-suspended-return" onClick={() => void returnToWall()}>
+            <Button
+              variant="primary"
+              className="external-tv-suspended-return"
+              onClick={() => void returnToWall()}
+            >
               <MonitorX size={16} /> <span>Return to Wall</span>
             </Button>
           </div>
