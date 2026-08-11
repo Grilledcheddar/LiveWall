@@ -14,8 +14,7 @@ export function getEmbedPolicy(source: Pick<VideoSource, 'type' | 'url'>): Embed
       return {
         externalOnly: true,
         webglRequired: true,
-        message:
-          'Weatherwise does not allow embedding because its frame-ancestors policy blocks LiveWall. Use Watch External.',
+        message: 'Weatherwise does not allow embedding. Use Watch External.',
       };
     }
   } catch {
