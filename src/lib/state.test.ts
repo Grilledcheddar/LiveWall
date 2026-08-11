@@ -65,6 +65,29 @@ describe('state rules', () => {
     });
     expect(compatibility.tiles[0].source.embedProfile).toBe('compatibility');
   });
+
+  it('normalizes Weatherwise as External Only while preserving its URL fragment', () => {
+    const weatherwise = newTile('Weatherwise', {
+      type: 'website',
+      url: 'https://web.weatherwise.app/#map=8.03/35.519/-97.062&rt=KTLX&rp=REF0',
+    });
+    const state = normalizeWallState({
+      ...emptyState(),
+      tiles: [
+        {
+          ...weatherwise,
+          source: {
+            type: 'website',
+            url: 'https://web.weatherwise.app/#map=8.03/35.519/-97.062&rt=KTLX&rp=REF0',
+            embedProfile: 'compatibility',
+            compatibilityConfirmed: true,
+          },
+        },
+      ],
+    });
+    expect(state.tiles[0].source.embedProfile).toBe('external');
+    expect(state.tiles[0].source.url).toContain('#map=8.03/35.519/-97.062&rt=KTLX&rp=REF0');
+  });
   it('recovers an expired queued replacement after reload', () => {
     const tile = { ...newTile('A', source('old')), queuedSource: source('new'), scheduledAt: 100 };
     const result = reconcileTimers({ ...emptyState(), tiles: [tile] }, 101);

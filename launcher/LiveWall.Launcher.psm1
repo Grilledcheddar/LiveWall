@@ -98,6 +98,7 @@ function Get-LiveWallExternalTvStatus {
   $process = Get-CimInstance Win32_Process -Filter "ProcessId = $([int]$session.processId)" -ErrorAction SilentlyContinue
   $test = Test-LiveWallExternalTvSession -Session $session -ExpectedBrowserPath $context.Browser.Path -ExpectedProfilePath $context.ProfilePath -Process $process
   if ($test.Valid) { return [pscustomobject]@{ Ok = $true; Status = 'active'; Message = 'External TV is active.'; Url = $session.url; ProcessId = $session.processId } }
+  if ($test.Status -eq 'already-closed') { return [pscustomobject]@{ Ok = $true; Status = 'closed'; Message = 'External TV is not active.' } }
   if ($test.Status -eq 'stale') { [void](Save-LiveWallExternalTvSession -Root $Root -ProcessId ([int]$session.processId) -BrowserPath $context.Browser.Path -ProfilePath $context.ProfilePath -Url $session.url -Status 'closed'); return [pscustomobject]@{ Ok = $true; Status = 'closed'; Message = 'External TV closed; LiveWall can be restored.' } }
   [pscustomobject]@{ Ok = $false; Status = $test.Status; Message = $test.Message }
 }

@@ -85,9 +85,9 @@ test('P4 generic embed profiles are exact and External TV suspends then restores
   await card.getByRole('button', { name: 'External Only' }).click();
   await expect(wall.getByRole('heading', { name: 'External TV Mode is active.' })).toHaveCount(0);
   await card.getByRole('button', { name: 'Watch on Wall' }).click();
-  await expect(admin.getByText('External TV Mode is active.')).toBeVisible();
+  await expect(admin.getByText('External TV Mode is active', { exact: false })).toBeVisible();
   await expect(wall.getByRole('heading', { name: 'External TV Mode is active.' })).toBeVisible();
-  await admin.getByRole('button', { name: 'Return to Wall' }).click();
+  await admin.getByRole('button', { name: 'Close External TV & Return to Wall' }).click();
   await expect(wall.locator('.player-tile')).toHaveCount(2);
   await context.close();
 });

@@ -192,7 +192,7 @@ export function WallPage() {
               className="external-tv-suspended-return"
               onClick={() => void returnToWall()}
             >
-              <MonitorX size={16} /> <span>Return to Wall</span>
+              <MonitorX size={16} /> <span>Close External TV &amp; Return to Wall</span>
             </Button>
           </div>
         ) : !tiles.length ? (

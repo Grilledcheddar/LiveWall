@@ -39,6 +39,7 @@ import { normalizeSourceLibrary, saveLibrarySource, setLibraryFavorite } from '.
 import { activateAutomaticLayout, activateFreeformLayout } from '../lib/layouts';
 import { canonicalSourceUrl, detectSource } from '../lib/sources';
 import { hlsQualityLabel, qualityPreferenceForLevel, qualityPreferenceValue } from '../lib/quality';
+import { getEmbedPolicy } from '../lib/embed-policy';
 import {
   defaultAppearance,
   moveTile,
@@ -521,6 +522,7 @@ function TileCard({
   externalTvActive: boolean;
   onWatchOnWall: (url: string) => void;
 }) {
+  const embedPolicy = getEmbedPolicy(tile.source);
   const [queueUrl, setQueueUrl] = useState('');
   const [delay, setDelay] = useState(60);
   const [seek, setSeek] = useState(0);
@@ -763,20 +765,20 @@ function TileCard({
       {tile.source.type === 'website' && (
         <div className="embed-settings">
           <strong>
-            {tile.source.embedProfile === 'external'
+            {embedPolicy?.externalOnly || tile.source.embedProfile === 'external'
               ? 'External Only'
               : tile.source.embedProfile === 'compatibility'
                 ? 'Compatibility Embed'
                 : 'Safe Embed'}
           </strong>
           <small>
-            LiveWall can confirm the embedded page loaded, but many providers do not expose playback
-            state to another site.
+            {embedPolicy?.message ??
+              'LiveWall can confirm the embedded page loaded, but many providers do not expose playback state to another site.'}
           </small>
           <div>
             <Button
               variant="secondary"
-              disabled={tile.source.embedProfile === 'safe'}
+              disabled={Boolean(embedPolicy?.externalOnly) || tile.source.embedProfile === 'safe'}
               onClick={() =>
                 void onSave((current) => ({
                   ...current,
@@ -793,7 +795,9 @@ function TileCard({
             </Button>
             <Button
               variant="secondary"
-              disabled={tile.source.embedProfile === 'compatibility'}
+              disabled={
+                Boolean(embedPolicy?.externalOnly) || tile.source.embedProfile === 'compatibility'
+              }
               onClick={() => {
                 if (
                   !tile.source.compatibilityConfirmed &&
@@ -1076,6 +1080,7 @@ export function AdminPage() {
   const [externalTv, setExternalTv] = useState<{
     phase: string;
     message: string;
+    url?: string;
     fallbackUsed?: boolean;
   }>({ phase: 'wall-active', message: '' });
   const tiles = useMemo(() => orderedTiles(state.tiles), [state.tiles]);
@@ -1291,13 +1296,16 @@ export function AdminPage() {
     <main className="admin-shell">
       {externalTv.phase === 'external-active' && (
         <div className="external-tv-banner" role="status">
-          <strong>External TV Mode is active.</strong>
+          <strong>
+            External TV Mode is active
+            {externalTv.url ? ` — ${new URL(externalTv.url).hostname}` : ''}.
+          </strong>
           <span>
             Provider controls playback, volume, sign-in, and subscriptions in the dedicated TV
             window.
           </span>
           <Button variant="primary" onClick={() => void returnToWall()}>
-            Return to Wall
+            Close External TV &amp; Return to Wall
           </Button>
         </div>
       )}

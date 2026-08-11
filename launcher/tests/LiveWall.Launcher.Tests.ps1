@@ -223,3 +223,10 @@ Describe 'LiveWall dedicated Wall session validation' {
     $result.Status | Should Be 'already-closed'
   }
 }
+
+Describe 'LiveWall External TV closed-session recovery' {
+  It 'reports an already-closed External TV session as a safe closed status' {
+    $moduleText = Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'LiveWall.Launcher.psm1') -Raw
+    $moduleText | Should Match 'Status -eq ''already-closed''\) \{ return \[pscustomobject\]@\{ Ok = \$true; Status = ''closed'''
+  }
+}

@@ -1,4 +1,5 @@
 import { canonicalSourceUrl, detectSource } from './sources.js';
+import { getEmbedPolicy } from './embed-policy.js';
 import { normalizePlaybackStart } from './playback.js';
 import type {
   LibraryImportFile,
@@ -27,16 +28,18 @@ function safeSource(
   try {
     const detected = detectSource(originalUrl);
     const savedSource = isRecord(value.source) ? value.source : {};
+    const policy = getEmbedPolicy(detected);
     const source: VideoSource =
       detected.type === 'website'
         ? {
             ...detected,
-            embedProfile: ['safe', 'compatibility', 'external'].includes(
-              String(savedSource.embedProfile),
-            )
-              ? (savedSource.embedProfile as VideoSource['embedProfile'])
-              : 'safe',
-            compatibilityConfirmed: savedSource.compatibilityConfirmed === true || undefined,
+            embedProfile: policy?.externalOnly
+              ? 'external'
+              : ['safe', 'compatibility', 'external'].includes(String(savedSource.embedProfile))
+                ? (savedSource.embedProfile as VideoSource['embedProfile'])
+                : 'safe',
+            compatibilityConfirmed:
+              !policy?.externalOnly && (savedSource.compatibilityConfirmed === true || undefined),
             embedReferrerPolicy:
               savedSource.embedReferrerPolicy === 'strict-origin-when-cross-origin'
                 ? 'strict-origin-when-cross-origin'

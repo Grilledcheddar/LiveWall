@@ -11,6 +11,7 @@ import { normalizeFreeformLayout, normalizeLayoutSlots } from './layouts.js';
 import { defaultStartBehavior, normalizePlaybackStart } from './playback.js';
 import { normalizeQualityPreferences } from './quality.js';
 import { detectSource } from './sources.js';
+import { getEmbedPolicy } from './embed-policy.js';
 
 export const DEFAULT_APPEARANCE: Readonly<WallAppearance> = Object.freeze({
   backgroundColor: '#020305',
@@ -103,6 +104,7 @@ function normalizeVideoSource(value: unknown, label: string): VideoSource {
   } catch {
     throw new Error(`${label} has an unsafe URL.`);
   }
+  const policy = type === 'website' ? getEmbedPolicy(detected) : undefined;
   return {
     url: detected.url,
     type: type as VideoSource['type'],
@@ -119,15 +121,18 @@ function normalizeVideoSource(value: unknown, label: string): VideoSource {
       value.playlistStartIndex >= 0
         ? value.playlistStartIndex
         : undefined,
-    embedProfile:
-      type === 'website' &&
-      ['safe', 'compatibility', 'external'].includes(String(value.embedProfile))
+    embedProfile: policy?.externalOnly
+      ? 'external'
+      : type === 'website' &&
+          ['safe', 'compatibility', 'external'].includes(String(value.embedProfile))
         ? (value.embedProfile as VideoSource['embedProfile'])
         : type === 'website'
           ? 'safe'
           : undefined,
     compatibilityConfirmed:
-      type === 'website' && value.compatibilityConfirmed === true ? true : undefined,
+      !policy?.externalOnly && type === 'website' && value.compatibilityConfirmed === true
+        ? true
+        : undefined,
     embedReferrerPolicy:
       type === 'website' && value.embedReferrerPolicy === 'strict-origin-when-cross-origin'
         ? 'strict-origin-when-cross-origin'

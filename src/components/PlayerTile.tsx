@@ -13,6 +13,7 @@ import type {
 } from '../lib/types';
 import { resumeTarget, PROGRESS_INTERVAL_MS } from '../lib/playback';
 import { resolveHlsQualityLevel } from '../lib/quality';
+import { getEmbedPolicy } from '../lib/embed-policy';
 
 interface Adapter {
   play(): void | Promise<void>;
@@ -807,10 +808,12 @@ export const PlayerTile = memo(function PlayerTile({
       applyStartBehavior();
       applyPendingControls();
     } else {
-      if (tile.source.embedProfile === 'external') {
+      const embedPolicy = getEmbedPolicy({ type: tile.source.type, url: tile.source.url });
+      if (tile.source.embedProfile === 'external' || embedPolicy?.externalOnly) {
         publish(
           'unsupported',
-          'External Only source. Use Watch on Wall to open it in the dedicated TV window.',
+          embedPolicy?.message ??
+            'External Only source. Use Watch on Wall to open it in the dedicated TV window.',
         );
         adapter.current = emptyAdapter;
         adapterReady.current = true;

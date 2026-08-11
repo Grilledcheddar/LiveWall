@@ -45,4 +45,26 @@ describe('External TV coordination', () => {
       url: 'https://provider.example/watch',
     });
   });
+
+  it('safely restores the Wall when the exact external process was already closed', async () => {
+    const calls: string[] = [];
+    const service = new ExternalTvService(
+      'C:/LiveWall',
+      async (action) => {
+        calls.push(`tv:${action}`);
+        return {
+          Ok: true,
+          Status: action === 'open' ? 'opened' : 'closed',
+          Message: action,
+        };
+      },
+      async (action) => {
+        calls.push(`wall:${action}`);
+        return { Ok: true, Status: action === 'open' ? 'opened' : 'closed', Message: action };
+      },
+    );
+    await service.open('https://provider.example/watch');
+    expect((await service.refresh()).phase).toBe('wall-active');
+    expect(calls).toEqual(['wall:close', 'tv:open', 'tv:status', 'tv:close', 'wall:open']);
+  });
 });
