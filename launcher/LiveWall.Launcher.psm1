@@ -443,7 +443,11 @@ function Close-LiveWallDedicatedWall {
   $registered = Get-CimInstance Win32_Process -Filter "ProcessId = $([int]$session.processId)" -ErrorAction SilentlyContinue
   $validation = Test-LiveWallWallSession -Session $session -ExpectedBrowserPath $context.Browser.Path `
     -ExpectedProfilePath $context.ProfilePath -ExpectedUrl $context.Url -Process $registered
-  if (-not $validation.Valid) {
+  # Chrome can hand off the process returned by Start-Process to a child and then
+  # exit.  A stale PID must not leave the dedicated Wall stranded, but a mismatch
+  # is still a hard stop: never close a process that is not in LiveWall's exact
+  # browser/profile pair.
+  if (-not $validation.Valid -and $validation.Status -ne 'stale') {
     return [pscustomobject]@{ Ok = $false; Status = $validation.Status; Message = $validation.Message }
   }
   $expectedBrowser = [IO.Path]::GetFullPath($context.Browser.Path)
@@ -457,7 +461,12 @@ function Close-LiveWallDedicatedWall {
   [void](Save-LiveWallWallSession -Root $Root -ProcessId ([int]$session.processId) `
       -BrowserPath $expectedBrowser -ProfilePath $expectedProfile -Url $context.Url `
       -Mode ([string]$context.Config.wallMode) -Status 'closed')
-  [pscustomobject]@{ Ok = $true; Status = 'closed'; Message = 'The dedicated Wall was closed. The server and saved configuration remain running.'; ProcessCount = $processes.Count }
+  $message = if ($validation.Status -eq 'stale') {
+    'The stale Wall launcher record was recovered and only the dedicated Wall browser profile was closed.'
+  } else {
+    'The dedicated Wall was closed. The server and saved configuration remain running.'
+  }
+  [pscustomobject]@{ Ok = $true; Status = 'closed'; Message = $message; ProcessCount = $processes.Count }
 }
 
 function Open-LiveWallDedicatedWall {

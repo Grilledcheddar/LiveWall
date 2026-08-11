@@ -222,6 +222,13 @@ Describe 'LiveWall dedicated Wall session validation' {
     $result = Test-LiveWallWallSession -Session $closed -ExpectedBrowserPath $browser -ExpectedProfilePath $profile -ExpectedUrl $url -Process $null
     $result.Status | Should Be 'already-closed'
   }
+
+  It 'recovers a stale launcher PID by closing only the dedicated Wall profile' {
+    $moduleText = Get-Content -LiteralPath $modulePath -Raw
+    $moduleText | Should Match "\$validation.Status -ne 'stale'"
+    $moduleText | Should Match '\$_.CommandLine -match \$profileArgument'
+    $moduleText | Should Match 'stale Wall launcher record was recovered'
+  }
 }
 
 Describe 'LiveWall External TV closed-session recovery' {
