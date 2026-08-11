@@ -84,7 +84,11 @@ function Test-LiveWallExternalTvSession {
   if (-not $Process) { return [pscustomobject]@{ Valid = $false; Status = 'stale'; Message = 'The dedicated External TV process is no longer running.' } }
   $browser = [IO.Path]::GetFullPath($ExpectedBrowserPath); $profile = [IO.Path]::GetFullPath($ExpectedProfilePath).TrimEnd('\')
   $profileArgument = '--user-data-dir=(?:")?' + [regex]::Escape($profile) + '(?:")?(?:\s|$)'
-  $valid = $Process.ExecutablePath -and ([IO.Path]::GetFullPath([string]$Process.ExecutablePath) -ieq $browser) -and [int]$Session.processId -eq [int]$Process.ProcessId -and [string]$Session.profilePath -ieq $profile -and $Process.CommandLine -match $profileArgument -and ([string]$Process.CommandLine).IndexOf([string]$Session.url,[StringComparison]::OrdinalIgnoreCase) -ge 0
+  # Chrome may hand the visible fullscreen window to a child process. The
+  # isolated, launcher-owned profile is the stable session identity; requiring
+  # the original parent's PID or URL would falsely report that live window as
+  # manually closed.
+  $valid = $Process.ExecutablePath -and ([IO.Path]::GetFullPath([string]$Process.ExecutablePath) -ieq $browser) -and [string]$Session.profilePath -ieq $profile -and $Process.CommandLine -match $profileArgument
   if (-not $valid) { return [pscustomobject]@{ Valid = $false; Status = 'mismatch'; Message = 'The registered External TV process did not match its executable, profile, and URL. Nothing was closed.' } }
   [pscustomobject]@{ Valid = $true; Status = 'open'; Message = 'The dedicated External TV process is valid.' }
 }
@@ -99,7 +103,19 @@ function Get-LiveWallExternalTvStatus {
   $test = Test-LiveWallExternalTvSession -Session $session -ExpectedBrowserPath $context.Browser.Path -ExpectedProfilePath $context.ProfilePath -Process $process
   if ($test.Valid) { return [pscustomobject]@{ Ok = $true; Status = 'active'; Message = 'External TV is active.'; Url = $session.url; ProcessId = $session.processId } }
   if ($test.Status -eq 'already-closed') { return [pscustomobject]@{ Ok = $true; Status = 'closed'; Message = 'External TV is not active.' } }
-  if ($test.Status -eq 'stale') { [void](Save-LiveWallExternalTvSession -Root $Root -ProcessId ([int]$session.processId) -BrowserPath $context.Browser.Path -ProfilePath $context.ProfilePath -Url $session.url -Status 'closed'); return [pscustomobject]@{ Ok = $true; Status = 'closed'; Message = 'External TV closed; LiveWall can be restored.' } }
+  if ($test.Status -eq 'stale') {
+    $browser = [IO.Path]::GetFullPath($context.Browser.Path); $profile = [IO.Path]::GetFullPath($context.ProfilePath).TrimEnd('\')
+    $profileArgument = '--user-data-dir=(?:")?' + [regex]::Escape($profile) + '(?:")?(?:\s|$)'
+    $replacement = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+      $_.ExecutablePath -and ([IO.Path]::GetFullPath([string]$_.ExecutablePath) -ieq $browser) -and $_.CommandLine -and [string]$_.CommandLine -match $profileArgument
+    })
+    if ($replacement.Count -gt 0) {
+      [void](Save-LiveWallExternalTvSession -Root $Root -ProcessId ([int]$replacement[0].ProcessId) -BrowserPath $context.Browser.Path -ProfilePath $context.ProfilePath -Url $session.url)
+      return [pscustomobject]@{ Ok = $true; Status = 'active'; Message = 'External TV is active.'; Url = $session.url; ProcessId = [int]$replacement[0].ProcessId }
+    }
+    [void](Save-LiveWallExternalTvSession -Root $Root -ProcessId ([int]$session.processId) -BrowserPath $context.Browser.Path -ProfilePath $context.ProfilePath -Url $session.url -Status 'closed')
+    return [pscustomobject]@{ Ok = $true; Status = 'closed'; Message = 'External TV closed; LiveWall can be restored.' }
+  }
   [pscustomobject]@{ Ok = $false; Status = $test.Status; Message = $test.Message }
 }
 
@@ -124,8 +140,13 @@ function Close-LiveWallExternalTv {
   $process = Get-CimInstance Win32_Process -Filter "ProcessId = $([int]$session.processId)" -ErrorAction SilentlyContinue
   $test = Test-LiveWallExternalTvSession -Session $session -ExpectedBrowserPath $context.Browser.Path -ExpectedProfilePath $context.ProfilePath -Process $process
   if ($test.Status -eq 'already-closed') { return [pscustomobject]@{ Ok = $true; Status = 'already-closed'; Message = 'External TV is already closed.' } }
-  if (-not $test.Valid) { return [pscustomobject]@{ Ok = $false; Status = $test.Status; Message = $test.Message } }
-  Stop-Process -Id $process.ProcessId -ErrorAction SilentlyContinue
+  if (-not $test.Valid -and $test.Status -ne 'stale') { return [pscustomobject]@{ Ok = $false; Status = $test.Status; Message = $test.Message } }
+  $browser = [IO.Path]::GetFullPath($context.Browser.Path); $profile = [IO.Path]::GetFullPath($context.ProfilePath).TrimEnd('\')
+  $profileArgument = '--user-data-dir=(?:")?' + [regex]::Escape($profile) + '(?:")?(?:\s|$)'
+  $processes = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+    $_.ExecutablePath -and ([IO.Path]::GetFullPath([string]$_.ExecutablePath) -ieq $browser) -and $_.CommandLine -and [string]$_.CommandLine -match $profileArgument
+  })
+  foreach ($owned in $processes) { Stop-Process -Id $owned.ProcessId -ErrorAction SilentlyContinue }
   [void](Save-LiveWallExternalTvSession -Root $Root -ProcessId ([int]$session.processId) -BrowserPath $context.Browser.Path -ProfilePath $context.ProfilePath -Url $session.url -Status 'closed')
   [pscustomobject]@{ Ok = $true; Status = 'closed'; Message = 'External TV closed.' }
 }

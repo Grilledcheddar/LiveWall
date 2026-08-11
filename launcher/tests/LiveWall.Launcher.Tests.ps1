@@ -236,4 +236,11 @@ Describe 'LiveWall External TV closed-session recovery' {
     $moduleText = Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'LiveWall.Launcher.psm1') -Raw
     $moduleText | Should Match 'Status -eq ''already-closed''\) \{ return \[pscustomobject\]@\{ Ok = \$true; Status = ''closed'''
   }
+
+  It 'uses the isolated External TV profile when Chrome hands off the launch PID' {
+    $moduleText = Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'LiveWall.Launcher.psm1') -Raw
+    $moduleText | Should Match 'Chrome may hand the visible fullscreen window to a child process'
+    $moduleText | Should Match "\$test.Status -ne 'stale'"
+    $moduleText | Should Match 'External TV is active'
+  }
 }
