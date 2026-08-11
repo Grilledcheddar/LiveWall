@@ -1707,6 +1707,12 @@ a {
 }
 .external-tv-banner {
   margin: 16px 32px 0;
+  position: sticky;
+  top: 12px;
+  z-index: 6;
+}
+.external-tv-banner--legacy {
+  display: none;
 }
 .external-tv-suspended {
   display: grid;

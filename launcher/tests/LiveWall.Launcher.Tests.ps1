@@ -232,15 +232,52 @@ Describe 'LiveWall dedicated Wall session validation' {
 }
 
 Describe 'LiveWall External TV closed-session recovery' {
-  It 'reports an already-closed External TV session as a safe closed status' {
+  It 'uses bounded polling and an exact profile to resolve the stable window' {
     $moduleText = Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'LiveWall.Launcher.psm1') -Raw
-    $moduleText | Should Match 'Status -eq ''already-closed''\) \{ return \[pscustomobject\]@\{ Ok = \$true; Status = ''closed'''
+    $moduleText | Should Match 'function Wait-LiveWallExternalTvWindow'
+    $moduleText | Should Match 'TimeoutMilliseconds = 8000'
+    $moduleText | Should Match 'Get-LiveWallExternalTvCandidates -BrowserPath'
+    $moduleText | Should Match 'WindowHandle'
   }
 
-  It 'uses the isolated External TV profile when Chrome hands off the launch PID' {
+  It 'selects only a top-level window and prefers the launch session token' {
+    $candidates = @(
+      [pscustomobject]@{ ProcessId = 1; CommandLine = '--type=renderer --user-data-dir=C:\isolated'; IsTopLevel = $false; WindowHandle = [Int64]55 },
+      [pscustomobject]@{ ProcessId = 2; CommandLine = '--user-data-dir=C:\isolated'; IsTopLevel = $true; WindowHandle = [Int64]66 },
+      [pscustomobject]@{ ProcessId = 3; CommandLine = '--user-data-dir=C:\isolated --livewall-external-session=token'; IsTopLevel = $true; WindowHandle = [Int64]77 }
+    )
+    $selected = Select-LiveWallExternalTvWindow -Candidates $candidates -SessionToken 'token'
+    $selected.ProcessId | Should Be 3
+  }
+
+  It 'accepts a stable child window after the initial launch PID has exited' {
+    InModuleScope LiveWall.Launcher {
+      $script:externalPoll = 0
+      Mock Get-LiveWallExternalTvCandidates {
+        $script:externalPoll++
+        @(
+          [pscustomobject]@{ ProcessId = 41; CommandLine = '--type=renderer --user-data-dir=C:\isolated'; IsTopLevel = $false; WindowHandle = [Int64]0 },
+          [pscustomobject]@{ ProcessId = 42; CommandLine = '--user-data-dir=C:\isolated --livewall-external-session=handoff'; IsTopLevel = $true; WindowHandle = [Int64]99 }
+        )
+      }
+      $result = Wait-LiveWallExternalTvWindow -BrowserPath 'C:\browser.exe' -ProfilePath 'C:\isolated' -SessionToken 'handoff' -TimeoutMilliseconds 500 -PollMilliseconds 1
+      $result.Found | Should Be $true
+      $result.Window.ProcessId | Should Be 42
+      Assert-MockCalled Get-LiveWallExternalTvCandidates -Times 2 -Exactly
+    }
+  }
+
+  It 'reports a bounded failure when no dedicated profile window appears' {
+    InModuleScope LiveWall.Launcher {
+      Mock Get-LiveWallExternalTvCandidates { @() }
+      $result = Wait-LiveWallExternalTvWindow -BrowserPath 'C:\browser.exe' -ProfilePath 'C:\missing' -SessionToken 'none' -TimeoutMilliseconds 5 -PollMilliseconds 1
+      $result.Found | Should Be $false
+    }
+  }
+
+  It 'limits close operations to the exact External TV profile candidate list' {
     $moduleText = Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'LiveWall.Launcher.psm1') -Raw
-    $moduleText | Should Match 'Chrome may hand the visible fullscreen window to a child process'
-    $moduleText | Should Match "\$test.Status -ne 'stale'"
-    $moduleText | Should Match 'External TV is active'
+    $moduleText | Should Match 'Get-LiveWallExternalTvCandidates -BrowserPath \$context.Browser.Path -ProfilePath \$context.ProfilePath'
+    $moduleText | Should Not Match 'taskkill'
   }
 }

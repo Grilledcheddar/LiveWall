@@ -1083,6 +1083,7 @@ export function AdminPage() {
     url?: string;
     fallbackUsed?: boolean;
   }>({ phase: 'wall-active', message: '' });
+  const externalTvRequestEpoch = useRef(0);
   const tiles = useMemo(() => orderedTiles(state.tiles), [state.tiles]);
   const appearance = normalizeAppearance(state.appearance);
   const overlayMode = normalizeOverlayMode(state.overlayMode);
@@ -1144,15 +1145,21 @@ export function AdminPage() {
 
   useEffect(() => {
     let active = true;
-    const refresh = () =>
+    const refresh = () => {
+      const requestEpoch = ++externalTvRequestEpoch.current;
       fetch('/api/external-tv')
         .then((response) => response.json())
-        .then((result) => active && setExternalTv(result))
+        .then(
+          (result) =>
+            active && requestEpoch === externalTvRequestEpoch.current && setExternalTv(result),
+        )
         .catch(
           () =>
             active &&
+            requestEpoch === externalTvRequestEpoch.current &&
             setExternalTv({ phase: 'failed', message: 'External TV status is unavailable.' }),
         );
+    };
     void refresh();
     const timer = window.setInterval(refresh, 3_000);
     return () => {
@@ -1162,6 +1169,7 @@ export function AdminPage() {
   }, []);
 
   async function watchOnWall(url: string) {
+    const requestEpoch = ++externalTvRequestEpoch.current;
     try {
       const response = await fetch('/api/external-tv/open', {
         method: 'POST',
@@ -1169,7 +1177,7 @@ export function AdminPage() {
         body: JSON.stringify({ url }),
       });
       const result = await response.json();
-      setExternalTv(result);
+      if (requestEpoch === externalTvRequestEpoch.current) setExternalTv(result);
       if (!response.ok) throw new Error(result.message);
       setGlobalMessage(result.message);
     } catch (error) {
@@ -1177,9 +1185,10 @@ export function AdminPage() {
     }
   }
   async function returnToWall() {
+    const requestEpoch = ++externalTvRequestEpoch.current;
     const response = await fetch('/api/external-tv/return', { method: 'POST' });
     const result = await response.json();
-    setExternalTv(result);
+    if (requestEpoch === externalTvRequestEpoch.current) setExternalTv(result);
     setGlobalMessage(result.message);
   }
 
@@ -1294,8 +1303,8 @@ export function AdminPage() {
 
   return (
     <main className="admin-shell">
-      {externalTv.phase === 'external-active' && (
-        <div className="external-tv-banner" role="status">
+      {externalTv.phase === 'unavailable' && (
+        <div className="external-tv-banner external-tv-banner--legacy" role="status">
           <strong>
             External TV Mode is active
             {externalTv.url ? ` — ${new URL(externalTv.url).hostname}` : ''}.
@@ -1333,6 +1342,17 @@ export function AdminPage() {
         </div>
       </aside>
       <section className="admin-main">
+        {externalTv.phase === 'external-active' && (
+          <div className="external-tv-banner" role="status">
+            <strong>External TV Mode is active{externalTv.url ? ` — ${new URL(externalTv.url).hostname}` : ''}.</strong>
+            <span>
+              Provider controls playback, volume, sign-in, and subscriptions in the dedicated TV window.
+            </span>
+            <Button variant="primary" onClick={() => void returnToWall()}>
+              Close External TV &amp; Return to Wall
+            </Button>
+          </div>
+        )}
         {stateError && (
           <div className="state-error" role="alert">
             {stateError}
