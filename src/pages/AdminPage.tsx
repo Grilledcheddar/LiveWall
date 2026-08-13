@@ -38,6 +38,7 @@ import { useLocalStorageState } from '../hooks/useLocalStorageState';
 import { normalizeSourceLibrary, saveLibrarySource, setLibraryFavorite } from '../lib/library';
 import { activateAutomaticLayout, activateFreeformLayout } from '../lib/layouts';
 import { canonicalSourceUrl, detectSource } from '../lib/sources';
+import { externalViewModes, type ExternalViewMode, type SplitRatio } from '../lib/split-view';
 import { hlsQualityLabel, qualityPreferenceForLevel, qualityPreferenceValue } from '../lib/quality';
 import { getEmbedPolicy } from '../lib/embed-policy';
 import {
@@ -493,6 +494,10 @@ function TileCard({
   onQualityPreference,
   externalTvActive,
   onWatchOnWall,
+  externalViewMode,
+  externalViewRatio,
+  onExternalViewMode,
+  onExternalViewRatio,
 }: {
   tile: Tile;
   isActiveAudio: boolean;
@@ -521,6 +526,10 @@ function TileCard({
   onQualityPreference: (preference: QualityPreference) => Promise<unknown>;
   externalTvActive: boolean;
   onWatchOnWall: (url: string) => void;
+  externalViewMode: ExternalViewMode;
+  externalViewRatio: SplitRatio;
+  onExternalViewMode: (mode: ExternalViewMode) => void;
+  onExternalViewRatio: (ratio: SplitRatio) => void;
 }) {
   const embedPolicy = getEmbedPolicy(tile.source);
   const [queueUrl, setQueueUrl] = useState('');
@@ -532,6 +541,12 @@ function TileCard({
   const volumeTimer = useRef<number | undefined>(undefined);
   const latestVolume = useRef(tile.volume);
   const controllable = tile.source.type !== 'website';
+  const youtubeGoLiveUnavailable =
+    tile.source.type === 'youtube-playlist'
+      ? 'Go Live is unavailable for playlist items.'
+      : health?.isLive
+        ? 'YouTube does not expose a controllable DVR live edge. Use YouTube’s native LIVE control on the Wall.'
+        : 'Go Live is available only for a currently live video.';
 
   useEffect(() => {
     if (!volumeTimer.current) {
@@ -640,8 +655,14 @@ function TileCard({
         <Button variant="secondary" disabled={!controllable} onClick={() => onCommand('restart')}>
           <RotateCw size={16} /> Restart
         </Button>
-        {health?.isLive && (
-          <Button variant="primary" className="go-live" onClick={() => onCommand('go-live')}>
+        {(tile.source.type === 'youtube' || tile.source.type === 'youtube-playlist') && (
+          <Button
+            variant="primary"
+            className="go-live"
+            disabled
+            title={youtubeGoLiveUnavailable}
+            onClick={() => onCommand('go-live')}
+          >
             <Radio size={15} /> Go Live
           </Button>
         )}
@@ -671,6 +692,10 @@ function TileCard({
             Go
           </Button>
         </label>
+        {(tile.source.type === 'youtube' || tile.source.type === 'youtube-playlist') &&
+        (tile.source.type !== 'youtube' || !health?.isLive) ? (
+          <small className="control-unavailable">{youtubeGoLiveUnavailable}</small>
+        ) : null}
       </div>
       <div className="playback-settings">
         <label>
@@ -836,6 +861,34 @@ function TileCard({
             >
               Watch on Wall
             </Button>
+            <label>
+              External view
+              <select
+                aria-label="External View"
+                value={externalViewMode}
+                disabled={externalTvActive}
+                onChange={(event) => onExternalViewMode(event.target.value as ExternalViewMode)}
+              >
+                {externalViewModes.map((mode) => (
+                  <option key={mode} value={mode}>
+                    {mode.replaceAll('-', ' ')}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Split ratio
+              <select
+                aria-label="Split ratio"
+                value={externalViewRatio}
+                disabled={externalTvActive || externalViewMode === 'fullscreen'}
+                onChange={(event) => onExternalViewRatio(Number(event.target.value) as SplitRatio)}
+              >
+                <option value={65}>65 / 35</option>
+                <option value={60}>60 / 40</option>
+                <option value={50}>50 / 50</option>
+              </select>
+            </label>
           </div>
         </div>
       )}
@@ -1083,6 +1136,8 @@ export function AdminPage() {
     url?: string;
     fallbackUsed?: boolean;
   }>({ phase: 'wall-active', message: '' });
+  const [externalViewMode, setExternalViewMode] = useState<ExternalViewMode>('fullscreen');
+  const [externalViewRatio, setExternalViewRatio] = useState<SplitRatio>(65);
   const externalTvRequestEpoch = useRef(0);
   const tiles = useMemo(() => orderedTiles(state.tiles), [state.tiles]);
   const appearance = normalizeAppearance(state.appearance);
@@ -1174,7 +1229,7 @@ export function AdminPage() {
       const response = await fetch('/api/external-tv/open', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify({ url, mode: externalViewMode, ratio: externalViewRatio }),
       });
       const result = await response.json();
       if (requestEpoch === externalTvRequestEpoch.current) setExternalTv(result);
@@ -1344,12 +1399,48 @@ export function AdminPage() {
       <section className="admin-main">
         {externalTv.phase === 'external-active' && (
           <div className="external-tv-banner" role="status">
-            <strong>External TV Mode is active{externalTv.url ? ` — ${new URL(externalTv.url).hostname}` : ''}.</strong>
+            <strong>
+              External TV Mode is active
+              {externalTv.url ? ` — ${new URL(externalTv.url).hostname}` : ''}.
+            </strong>
             <span>
-              Provider controls playback, volume, sign-in, and subscriptions in the dedicated TV window.
+              Provider controls playback, volume, sign-in, and subscriptions in the dedicated TV
+              window.
             </span>
+            <label>
+              External View
+              <select
+                aria-label="External View"
+                value={externalViewMode}
+                onChange={(event) => setExternalViewMode(event.target.value as ExternalViewMode)}
+              >
+                {externalViewModes.map((mode) => (
+                  <option key={mode} value={mode}>
+                    {mode.replaceAll('-', ' ')}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Split ratio
+              <select
+                aria-label="Split ratio"
+                value={externalViewRatio}
+                disabled={externalViewMode === 'fullscreen'}
+                onChange={(event) => setExternalViewRatio(Number(event.target.value) as SplitRatio)}
+              >
+                <option value={65}>65 / 35</option>
+                <option value={60}>60 / 40</option>
+                <option value={50}>50 / 50</option>
+              </select>
+            </label>
+            <small>
+              {externalViewMode === 'overlay'
+                ? 'External overlay covers the Wall; tiles are not rearranged.'
+                : `Temporary ${externalViewMode.replaceAll('-', ' ')} layout at ${externalViewRatio}/${100 - externalViewRatio}.`}
+            </small>
             <Button variant="primary" onClick={() => void returnToWall()}>
-              Close External TV &amp; Return to Wall
+              Return to full Wall
             </Button>
           </div>
         )}
@@ -1760,6 +1851,10 @@ export function AdminPage() {
                   }
                   externalTvActive={externalTv.phase === 'external-active'}
                   onWatchOnWall={watchOnWall}
+                  externalViewMode={externalViewMode}
+                  externalViewRatio={externalViewRatio}
+                  onExternalViewMode={setExternalViewMode}
+                  onExternalViewRatio={setExternalViewRatio}
                   onCommand={(name, value) => {
                     if (name === 'unmute') void setAudio(tile.id);
                     else {

@@ -24,7 +24,7 @@ interface Adapter {
   getPosition(): number | undefined;
   getDuration(): number | undefined;
   isLive(): boolean;
-  goLive(): void;
+  goLive(): number | undefined;
   getPlaylistIndex(): number | undefined;
   previous(): void;
   next(): void;
@@ -132,6 +132,7 @@ export const PlayerTile = memo(function PlayerTile({
   const hlsLevelsRef = useRef<HlsQualityLevel[]>([]);
   const qualityPreferenceRef = useRef(qualityPreference);
   const qualityHealthRef = useRef<Partial<PlayerHealth>>({});
+  const youtubeLiveEdgeUnavailable = useRef(false);
   const playbackRef = useRef(tile.playback);
   const progressRef = useRef(progress);
   latestName.current = tile.name;
@@ -301,12 +302,32 @@ export const PlayerTile = memo(function PlayerTile({
         return;
       }
       if (next.command === 'go-live') {
-        const applied = runControl('Go Live', (current) => current.goLive());
-        if (applied)
-          publish('playing', 'LIVE', undefined, undefined, undefined, {
-            isLive: true,
-            atLiveEdge: true,
-          });
+        const current = adapter.current;
+        if (!current) return;
+        if (tile.source.type === 'youtube' || tile.source.type === 'youtube-playlist') {
+          if (tile.source.type === 'youtube-playlist' || !current.isLive()) {
+            publish(
+              statusRef.current,
+              tile.source.type === 'youtube-playlist'
+                ? 'Go Live is unavailable for playlist items.'
+                : 'This YouTube video is not currently live.',
+              'youtube-go-live-unavailable',
+            );
+            return;
+          }
+          // The IFrame API exposes elapsed broadcast time, not a DVR seek range or live-edge signal.
+          // Do not issue a misleading seek or reload that leaves this stream behind the provider edge.
+          youtubeLiveEdgeUnavailable.current = true;
+          publish(
+            statusRef.current,
+            'YouTube does not expose a controllable live edge for this stream. Use its native LIVE control on the Wall.',
+            'youtube-live-edge-unavailable',
+          );
+          return;
+        }
+        runControl('Go Live', (adapter) => {
+          adapter.goLive();
+        });
         return;
       }
       if (next.command === 'restart') return runControl('Restart', (current) => current.seek(0));
@@ -349,7 +370,8 @@ export const PlayerTile = memo(function PlayerTile({
     if (!current) return;
     liveSource.current = current.isLive();
     if (liveSource.current) {
-      current.goLive();
+      if (tile.source.type === 'youtube' || tile.source.type === 'youtube-playlist') current.play();
+      else current.goLive();
       return;
     }
     const behavior = playbackRef.current?.behavior ?? 'resume';
@@ -364,7 +386,7 @@ export const PlayerTile = memo(function PlayerTile({
               : undefined),
         ),
       );
-  }, [tile.resumePosition]);
+  }, [tile.resumePosition, tile.source.type]);
 
   const scheduleRetry = useCallback(
     (friendly: string, detail: string) => {
@@ -497,7 +519,10 @@ export const PlayerTile = memo(function PlayerTile({
         getPosition: () => mockPosition,
         getDuration: () => (mockLive ? undefined : mockDuration),
         isLive: () => mockLive,
-        goLive: () => setMockPosition(mockDuration),
+        goLive: () => {
+          setMockPosition(mockDuration);
+          return mockDuration;
+        },
         getPlaylistIndex: () => (mockPlaylist.length ? mockPlaylistIndex : undefined),
         previous: () => {
           mockPlaylistIndex = Math.max(0, mockPlaylistIndex - 1);
@@ -631,15 +656,18 @@ export const PlayerTile = memo(function PlayerTile({
                 if (event.data === 1 && !muted) audioActivationRequired.current = false;
                 publish(
                   mapped[event.data] ?? 'unknown',
-                  stateMessage[event.data] ?? 'Player state unavailable',
+                  youtubeLiveEdgeUnavailable.current
+                    ? 'YouTube does not expose a controllable live edge for this stream. Use its native LIVE control on the Wall.'
+                    : (stateMessage[event.data] ?? 'Player state unavailable'),
                   undefined,
                   undefined,
                   undefined,
                   {
                     isLive,
-                    atLiveEdge: isLive
-                      ? duration === undefined || duration - position < 5
-                      : undefined,
+                    atLiveEdge:
+                      isLive && !['youtube', 'youtube-playlist'].includes(tile.source.type)
+                        ? duration === undefined || duration - position < 5
+                        : undefined,
                     position,
                     duration,
                     playlistIndex: isPlaylist ? index : undefined,
@@ -701,12 +729,7 @@ export const PlayerTile = memo(function PlayerTile({
             getPosition: () => Number(player.getCurrentTime?.()) || 0,
             getDuration: () => Number(player.getDuration?.()) || undefined,
             isLive: () => Boolean(player.getVideoData?.()?.isLive) || player.getDuration?.() === 0,
-            goLive: () => {
-              const duration = Number(player.getDuration?.());
-              if (Number.isFinite(duration) && duration > 0)
-                player.seekTo(Math.max(0, duration - 2), true);
-              player.playVideo();
-            },
+            goLive: () => undefined,
             getPlaylistIndex: () =>
               isPlaylist ? Math.max(0, Number(player.getPlaylistIndex?.()) || 0) : undefined,
             previous: () => isPlaylist && player.previousVideo(),
@@ -790,6 +813,9 @@ export const PlayerTile = memo(function PlayerTile({
           if (video.seekable.length)
             video.currentTime = Math.max(0, video.seekable.end(video.seekable.length - 1) - 2);
           void video.play();
+          return video.seekable.length
+            ? Math.max(0, video.seekable.end(video.seekable.length - 1) - 2)
+            : undefined;
         },
         getPlaylistIndex: () => undefined,
         previous() {},

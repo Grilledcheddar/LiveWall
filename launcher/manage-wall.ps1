@@ -1,14 +1,16 @@
 [CmdletBinding()]
 param(
   [Parameter(Mandatory = $true)][ValidateSet('status', 'close', 'open')][string]$Action,
-  [Parameter(Mandatory = $true)][string]$Root
+  [Parameter(Mandatory = $true)][string]$Root,
+  [ValidateSet('fullscreen','wall-top','external-top','external-left','wall-left','overlay')][string]$Placement = 'fullscreen',
+  [ValidateSet(65,60,50)][int]$Ratio = 65
 )
 
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'LiveWall.Launcher.psm1') -Force
 try {
   if ($Action -eq 'close') { $result = Close-LiveWallDedicatedWall -Root $Root }
-  elseif ($Action -eq 'open') { $result = Open-LiveWallDedicatedWall -Root $Root }
+  elseif ($Action -eq 'open') { $result = Open-LiveWallDedicatedWall -Root $Root -Placement $Placement -Ratio $Ratio }
   else {
     $path = Get-LiveWallWallSessionPath -Root $Root
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {

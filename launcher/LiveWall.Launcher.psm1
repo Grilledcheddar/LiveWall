@@ -60,9 +60,30 @@ function Get-LiveWallExternalTvContext {
   [pscustomobject]@{ Config = $wall.Config; Browser = $wall.Browser; ProfilePath = $profile; Monitor = [string]$wall.Config.externalTvMonitor }
 }
 
+function Get-LiveWallSplitViewGeometry {
+  param(
+    [Parameter(Mandatory = $true)]$Screen,
+    [ValidateSet('fullscreen','wall-top','external-top','external-left','wall-left','overlay')][string]$Placement = 'fullscreen',
+    [ValidateSet(65,60,50)][int]$Ratio = 65
+  )
+  $area = $Screen.WorkingArea
+  $full = [pscustomobject]@{ X = [int]$area.X; Y = [int]$area.Y; Width = [int]$area.Width; Height = [int]$area.Height }
+  if ($Placement -eq 'fullscreen') { return [pscustomobject]@{ Placement = $Placement; Ratio = $Ratio; Wall = $null; External = $full; TemporaryReflow = $false } }
+  if ($Placement -eq 'overlay') {
+    $width = [Math]::Max(240, [Math]::Round($area.Width * $Ratio / 100)); $height = [Math]::Max(240, [Math]::Round($area.Height * $Ratio / 100))
+    return [pscustomobject]@{ Placement = $Placement; Ratio = $Ratio; Wall = $full; External = [pscustomobject]@{ X = [int]($area.X + (($area.Width - $width) / 2)); Y = [int]($area.Y + (($area.Height - $height) / 2)); Width = [int]$width; Height = [int]$height }; TemporaryReflow = $false }
+  }
+  $horizontal = $Placement -in @('external-left','wall-left'); $total = if ($horizontal) { $area.Width } else { $area.Height }; $first = [Math]::Min($total - 240, [Math]::Max(240, [Math]::Round($total * $Ratio / 100))); $second = $total - $first
+  $firstRect = if ($horizontal) { [pscustomobject]@{ X = [int]$area.X; Y = [int]$area.Y; Width = [int]$first; Height = [int]$area.Height } } else { [pscustomobject]@{ X = [int]$area.X; Y = [int]$area.Y; Width = [int]$area.Width; Height = [int]$first } }
+  $secondRect = if ($horizontal) { [pscustomobject]@{ X = ([int]$area.X + [int]$first); Y = [int]$area.Y; Width = [int]$second; Height = [int]$area.Height } } else { [pscustomobject]@{ X = [int]$area.X; Y = ([int]$area.Y + [int]$first); Width = [int]$area.Width; Height = [int]$second } }
+  $wallFirst = $Placement -in @('wall-top','wall-left')
+  [pscustomobject]@{ Placement = $Placement; Ratio = $Ratio; Wall = if($wallFirst){$firstRect}else{$secondRect}; External = if($wallFirst){$secondRect}else{$firstRect}; TemporaryReflow = $true }
+}
+
 function New-LiveWallExternalTvArguments {
-  param([Parameter(Mandatory = $true)]$Screen,[Parameter(Mandatory = $true)][string]$ProfilePath,[Parameter(Mandatory = $true)][string]$Url,[bool]$Fullscreen = $true,[string]$SessionToken = '')
-  $arguments = @("--user-data-dir=`"$ProfilePath`"",'--no-first-run','--no-default-browser-check','--disable-background-mode','--new-window',"--window-position=$($Screen.Bounds.X),$($Screen.Bounds.Y)","--window-size=$($Screen.Bounds.Width),$($Screen.Bounds.Height)")
+  param([Parameter(Mandatory = $true)]$Screen,[Parameter(Mandatory = $true)][string]$ProfilePath,[Parameter(Mandatory = $true)][string]$Url,[bool]$Fullscreen = $true,[string]$SessionToken = '',$WindowRect)
+  if (-not $WindowRect) { $WindowRect = $Screen.WorkingArea }
+  $arguments = @("--user-data-dir=`"$ProfilePath`"",'--no-first-run','--no-default-browser-check','--disable-background-mode','--new-window',"--window-position=$($WindowRect.X),$($WindowRect.Y)","--window-size=$($WindowRect.Width),$($WindowRect.Height)")
   if ($Fullscreen) { $arguments += '--start-fullscreen' }
   if ($SessionToken) { $arguments += "--livewall-external-session=$SessionToken" }
   $arguments + $Url
@@ -141,14 +162,20 @@ function Get-LiveWallExternalTvStatus {
 }
 
 function Open-LiveWallExternalTv {
-  param([Parameter(Mandatory = $true)][string]$Root,[Parameter(Mandatory = $true)][string]$Url)
+  param(
+    [Parameter(Mandatory = $true)][string]$Root,
+    [Parameter(Mandatory = $true)][string]$Url,
+    [ValidateSet('fullscreen','wall-top','external-top','external-left','wall-left','overlay')][string]$Placement = 'fullscreen',
+    [ValidateSet(65,60,50)][int]$Ratio = 65
+  )
   if ($Url -notmatch '^https?://') { throw 'External TV accepts only http:// or https:// URLs.' }
   $existing = Get-LiveWallExternalTvStatus -Root $Root
   if ($existing.Status -eq 'active') { return [pscustomobject]@{ Ok = $true; Status = 'already-active'; Message = 'External TV is already active.'; ProcessId = $existing.ProcessId } }
   $context = Get-LiveWallExternalTvContext -Root $Root; $selection = Select-LiveWallDisplay -Screens @(Get-LiveWallScreens) -RequestedDeviceName $context.Monitor
   New-Item -ItemType Directory -Path $context.ProfilePath -Force | Out-Null
   $sessionToken = [guid]::NewGuid().ToString('N')
-  $arguments = New-LiveWallExternalTvArguments -Screen $selection.Screen -ProfilePath $context.ProfilePath -Url $Url -Fullscreen ([bool]$context.Config.externalTvFullscreen) -SessionToken $sessionToken
+  $geometry = Get-LiveWallSplitViewGeometry -Screen $selection.Screen -Placement $Placement -Ratio $Ratio
+  $arguments = New-LiveWallExternalTvArguments -Screen $selection.Screen -ProfilePath $context.ProfilePath -Url $Url -Fullscreen ($Placement -eq 'fullscreen') -SessionToken $sessionToken -WindowRect $geometry.External
   $process = Start-Process -FilePath $context.Browser.Path -ArgumentList $arguments -PassThru
   $resolved = Wait-LiveWallExternalTvWindow -BrowserPath $context.Browser.Path -ProfilePath $context.ProfilePath -SessionToken $sessionToken
   if (-not $resolved.Found) {
@@ -156,7 +183,7 @@ function Open-LiveWallExternalTv {
     throw "External TV did not open a dedicated browser window within 8 seconds (launchPid=$($process.Id), exit=$exitCode, candidates=$(Format-LiveWallExternalTvDiagnostics -Candidates $resolved.Candidates))."
   }
   [void](Save-LiveWallExternalTvSession -Root $Root -ProcessId $resolved.Window.ProcessId -BrowserPath $context.Browser.Path -ProfilePath $context.ProfilePath -Url $Url -LaunchProcessId $process.Id -WindowHandle $resolved.Window.WindowHandle -SessionToken $sessionToken)
-  [pscustomobject]@{ Ok = $true; Status = 'opened'; Message = "External TV opened on $($selection.Screen.DeviceName)."; ProcessId = $resolved.Window.ProcessId; WindowHandle = $resolved.Window.WindowHandle; Display = $selection.Screen.DeviceName; FallbackUsed = $selection.FallbackUsed }
+  [pscustomobject]@{ Ok = $true; Status = 'opened'; Message = "External TV opened on $($selection.Screen.DeviceName)."; ProcessId = $resolved.Window.ProcessId; WindowHandle = $resolved.Window.WindowHandle; Display = $selection.Screen.DeviceName; FallbackUsed = $selection.FallbackUsed; Placement = $Placement; Ratio = $Ratio }
 }
 
 function Close-LiveWallExternalTv {
@@ -270,17 +297,20 @@ function New-LiveWallWallArguments {
     [Parameter(Mandatory = $true)][string]$ProfilePath,
     [Parameter(Mandatory = $true)][string]$Url,
     [string]$Mode = 'kiosk',
-    [bool]$AutoplayWithSound = $false
+    [bool]$AutoplayWithSound = $false,
+    $WindowRect,
+    [bool]$SplitView = $false
   )
+  if (-not $WindowRect) { $WindowRect = $Screen.Bounds }
   $arguments = @(
     "--user-data-dir=`"$ProfilePath`"",
     '--no-first-run',
     '--no-default-browser-check',
     '--disable-background-mode',
-    "--window-position=$($Screen.Bounds.X),$($Screen.Bounds.Y)",
-    "--window-size=$($Screen.Bounds.Width),$($Screen.Bounds.Height)"
+    "--window-position=$($WindowRect.X),$($WindowRect.Y)",
+    "--window-size=$($WindowRect.Width),$($WindowRect.Height)"
   )
-  if ($Mode -eq 'kiosk') { $arguments += '--kiosk' }
+  if ($Mode -eq 'kiosk' -and -not $SplitView) { $arguments += '--kiosk' }
   if ($AutoplayWithSound) { $arguments += '--autoplay-policy=no-user-gesture-required' }
   $arguments + $Url
 }
@@ -511,7 +541,11 @@ function Close-LiveWallDedicatedWall {
 }
 
 function Open-LiveWallDedicatedWall {
-  param([Parameter(Mandatory = $true)][string]$Root)
+  param(
+    [Parameter(Mandatory = $true)][string]$Root,
+    [ValidateSet('fullscreen','wall-top','external-top','external-left','wall-left','overlay')][string]$Placement = 'fullscreen',
+    [ValidateSet(65,60,50)][int]$Ratio = 65
+  )
   $context = Get-LiveWallWallContext -Root $Root
   $screens = @(Get-LiveWallScreens)
   $selection = Select-LiveWallDisplay -Screens $screens -RequestedDeviceName ([string]$context.Config.wallDisplay)
@@ -531,13 +565,19 @@ function Open-LiveWallDedicatedWall {
       }
     }
   }
+  $geometry = Get-LiveWallSplitViewGeometry -Screen $selection.Screen -Placement $Placement -Ratio $Ratio
+  # A normal fullscreen Wall has always occupied the monitor bounds (including
+  # the taskbar area under kiosk). Split views use their calculated work-area
+  # rectangle, but a return must restore that original fullscreen geometry.
+  $wallRect = if ($geometry.Wall) { $geometry.Wall } else { $selection.Screen.Bounds }
   $arguments = New-LiveWallWallArguments -Screen $selection.Screen -ProfilePath $context.ProfilePath `
     -Url $context.Url -Mode ([string]$context.Config.wallMode) `
-    -AutoplayWithSound ([bool]$context.Config.wallAutoplayWithSound)
+    -AutoplayWithSound ([bool]$context.Config.wallAutoplayWithSound) `
+    -WindowRect $wallRect -SplitView ($Placement -ne 'fullscreen')
   $process = Start-Process -FilePath $context.Browser.Path -ArgumentList $arguments -PassThru
   [void](Save-LiveWallWallSession -Root $Root -ProcessId $process.Id -BrowserPath $context.Browser.Path `
       -ProfilePath $context.ProfilePath -Url $context.Url -Mode ([string]$context.Config.wallMode))
-  [pscustomobject]@{ Ok = $true; Status = 'opened'; Message = "The dedicated Wall opened on $($selection.Screen.DeviceName)."; ProcessId = $process.Id; Display = $selection.Screen.DeviceName; FallbackUsed = $selection.FallbackUsed }
+  [pscustomobject]@{ Ok = $true; Status = 'opened'; Message = "The dedicated Wall opened on $($selection.Screen.DeviceName)."; ProcessId = $process.Id; Display = $selection.Screen.DeviceName; FallbackUsed = $selection.FallbackUsed; Placement = $Placement; Ratio = $Ratio }
 }
 
 Export-ModuleMember -Function *-LiveWall*

@@ -293,7 +293,26 @@ app.get('/api/external-tv', async (_req, res) => {
 });
 app.post('/api/external-tv/open', async (req, res) => {
   try {
-    const result = await externalTv.open(String(req.body?.url ?? ''));
+    const modes = new Set([
+      'fullscreen',
+      'wall-top',
+      'external-top',
+      'external-left',
+      'wall-left',
+      'overlay',
+    ]);
+    const ratios = new Set([65, 60, 50]);
+    const mode = String(req.body?.mode ?? 'fullscreen');
+    const ratio = Number(req.body?.ratio ?? 65);
+    if (!modes.has(mode) || !ratios.has(ratio))
+      return res
+        .status(400)
+        .json({ phase: 'failed', message: 'The External View selection was not valid.' });
+    const result = await externalTv.open(
+      String(req.body?.url ?? ''),
+      mode as import('./external-tv.js').ExternalViewMode,
+      ratio as import('./external-tv.js').SplitRatio,
+    );
     res.status(result.phase === 'failed' ? 422 : 200).json(result);
   } catch (error) {
     res.status(400).json({

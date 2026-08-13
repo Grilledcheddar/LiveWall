@@ -267,12 +267,16 @@ describe('PlayerTile lifecycle', () => {
     expect(onPlaybackProgress).not.toHaveBeenCalled();
   });
 
-  it('uses the YouTube adapter to return live video to its current edge', async () => {
+  it('does not seek or reload a YouTube DVR stream when its duration jumps beyond playback', async () => {
     const seekTo = vi.fn();
     const playVideo = vi.fn();
+    const destroy = vi.fn();
+    const health: PlayerHealth[] = [];
+    let mounts = 0;
     window.YT = {
       Player: class {
         constructor(_node: HTMLElement, options: { events: { onReady: () => void } }) {
+          mounts += 1;
           queueMicrotask(() => options.events.onReady());
         }
         playVideo = playVideo;
@@ -281,11 +285,12 @@ describe('PlayerTile lifecycle', () => {
         mute = vi.fn();
         unMute = vi.fn();
         setVolume = vi.fn();
-        getCurrentTime = () => 30;
-        getDuration = () => 120;
+        // Sky News regression: seekTo(duration) is accepted, but duration then advances by a DVR window.
+        getCurrentTime = () => (mounts === 1 ? 13_172_417 : 13_179_615);
+        getDuration = () => (mounts === 1 ? 13_176_017 : 13_183_215);
         getVideoData = () => ({ isLive: true, title: 'Mock live' });
         getPlaylistIndex = () => 0;
-        destroy = vi.fn();
+        destroy = destroy;
       },
     };
     const tile = {
@@ -296,9 +301,70 @@ describe('PlayerTile lifecycle', () => {
       }),
       playback: { behavior: 'live' as const },
     };
-    render(<PlayerTile tile={tile} />);
-    await waitFor(() => expect(seekTo).toHaveBeenCalledWith(118, true));
-    expect(playVideo).toHaveBeenCalled();
+    const onHealth = (value: PlayerHealth) => health.push(value);
+    const view = render(<PlayerTile tile={tile} onHealth={onHealth} />);
+    await waitFor(() => expect(mounts).toBe(1));
+    view.rerender(
+      <PlayerTile
+        tile={tile}
+        onHealth={onHealth}
+        command={{ id: 'go-live', tileId: tile.id, command: 'go-live', sentAt: 1 }}
+      />,
+    );
+    await waitFor(() =>
+      expect(health.some((item) => item.technicalDetail === 'youtube-live-edge-unavailable')).toBe(
+        true,
+      ),
+    );
+    expect(mounts).toBe(1);
+    expect(seekTo).not.toHaveBeenCalled();
+    expect(destroy).not.toHaveBeenCalled();
+    expect(playVideo).toHaveBeenCalledOnce();
+  });
+
+  it('reports Go Live as unavailable for a YouTube VOD instead of attempting a seek', async () => {
+    const seekTo = vi.fn();
+    const health: PlayerHealth[] = [];
+    window.YT = {
+      Player: class {
+        constructor(_node: HTMLElement, options: { events: { onReady: () => void } }) {
+          queueMicrotask(() => options.events.onReady());
+        }
+        playVideo = vi.fn();
+        pauseVideo = vi.fn();
+        seekTo = seekTo;
+        mute = vi.fn();
+        unMute = vi.fn();
+        setVolume = vi.fn();
+        getCurrentTime = () => 30;
+        getDuration = () => 120;
+        getVideoData = () => ({ isLive: false, title: 'Mock VOD' });
+        getPlaylistIndex = () => 0;
+        destroy = vi.fn();
+      },
+    };
+    const tile = newTile('YouTube VOD', {
+      type: 'youtube',
+      url: 'https://www.youtube.com/watch?v=abcdefghijk',
+      youtubeId: 'abcdefghijk',
+    });
+    const onHealth = (value: PlayerHealth) => health.push(value);
+    const view = render(<PlayerTile tile={tile} onHealth={onHealth} />);
+    await waitFor(() => expect(health.some((item) => item.status === 'ready')).toBe(true));
+    seekTo.mockClear();
+    view.rerender(
+      <PlayerTile
+        tile={tile}
+        onHealth={onHealth}
+        command={{ id: 'go-live-vod', tileId: tile.id, command: 'go-live', sentAt: 1 }}
+      />,
+    );
+    await waitFor(() =>
+      expect(
+        health.some((item) => item.message === 'This YouTube video is not currently live.'),
+      ).toBe(true),
+    );
+    expect(seekTo).not.toHaveBeenCalled();
   });
 
   it('mounts a playlist without videoId and explicitly loads its canonical playlist', async () => {

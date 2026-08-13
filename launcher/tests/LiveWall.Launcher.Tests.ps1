@@ -128,6 +128,33 @@ Describe 'LiveWall browser discovery and arguments' {
     ($args -join ' ') | Should Match '--start-fullscreen'
     ($args -join ' ') | Should Not Match '--kiosk'
   }
+
+  It 'derives split regions from the selected monitor working area' {
+    $screen = New-TestScreen '\\.\DISPLAY2' $false -720 -2160 3840 2160 -720 -2160 3840 2080
+    $split = Get-LiveWallSplitViewGeometry -Screen $screen -Placement 'wall-top' -Ratio 65
+    $split.Wall.Y | Should Be -2160
+    $split.External.Y | Should Be ($split.Wall.Y + $split.Wall.Height)
+    ($split.Wall.Width + 0) | Should Be 3840
+    $split.External.Height | Should Be (2080 - $split.Wall.Height)
+  }
+
+  It 'uses explicit split rectangles without changing fullscreen kiosk behavior' {
+    $screen = New-TestScreen '\\.\DISPLAY2' $false -720 -2160 3840 2160 -720 -2160 3840 2080
+    $split = Get-LiveWallSplitViewGeometry -Screen $screen -Placement 'external-left' -Ratio 50
+    $wall = New-LiveWallWallArguments -Screen $screen -ProfilePath 'C:\LiveWall\wall' -Url 'http://127.0.0.1:4174/wall' -Mode kiosk -WindowRect $split.Wall -SplitView $true
+    ($wall -contains '--kiosk') | Should Be $false
+    ($wall -contains "--window-position=$($split.Wall.X),$($split.Wall.Y)") | Should Be $true
+    $external = New-LiveWallExternalTvArguments -Screen $screen -ProfilePath 'C:\LiveWall\external' -Url 'https://example.com' -Fullscreen $false -WindowRect $split.External
+    ($external -contains "--window-position=$($split.External.X),$($split.External.Y)") | Should Be $true
+  }
+
+  It 'keeps a returned fullscreen Wall on monitor bounds instead of the work area' {
+    $screen = New-TestScreen '\\.\DISPLAY2' $false -720 -2160 3840 2160 -720 -2160 3840 2080
+    $wall = New-LiveWallWallArguments -Screen $screen -ProfilePath 'C:\LiveWall\wall' -Url 'http://127.0.0.1:4174/wall'
+    ($wall -contains '--kiosk') | Should Be $true
+    ($wall -contains '--window-position=-720,-2160') | Should Be $true
+    ($wall -contains '--window-size=3840,2160') | Should Be $true
+  }
 }
 
 Describe 'LiveWall server readiness' {
