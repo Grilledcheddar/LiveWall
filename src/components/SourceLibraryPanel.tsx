@@ -19,7 +19,7 @@ import {
 } from '../lib/library';
 import {
   addSourceAsTile,
-  queueSourceForTile,
+  insertQueueSource,
   recordSourceInState,
   replaceTileSource,
 } from '../lib/state';
@@ -162,21 +162,15 @@ export function SourceLibraryPanel({
   async function queueForTile(entry: LibrarySource) {
     const tile = state.tiles.find((candidate) => candidate.id === resolvedTargetTileId);
     if (!tile) return onFeedback('Choose an active tile first.');
-    if (
-      tile.queuedSource &&
-      !confirm(`“${tile.name}” already has ${tile.queuedSource.url} queued. Replace it?`)
-    )
-      return;
     await saveState((current) =>
-      queueSourceForTile(
+      insertQueueSource(
         current,
         tile.id,
         entry.source,
         entry.title,
-        entry.titleMode,
-        Boolean(tile.queuedSource),
-        Date.now(),
+        'append',
         entry.playback,
+        entry.titleMode,
       ),
     );
     onFeedback(`Queued ‘${entry.title}’ for ‘${tile.name}’.`);

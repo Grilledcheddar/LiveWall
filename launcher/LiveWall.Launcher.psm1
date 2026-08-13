@@ -171,7 +171,7 @@ function Open-LiveWallExternalTv {
   if ($Url -notmatch '^https?://') { throw 'External TV accepts only http:// or https:// URLs.' }
   $existing = Get-LiveWallExternalTvStatus -Root $Root
   if ($existing.Status -eq 'active') { return [pscustomobject]@{ Ok = $true; Status = 'already-active'; Message = 'External TV is already active.'; ProcessId = $existing.ProcessId } }
-  $context = Get-LiveWallExternalTvContext -Root $Root; $selection = Select-LiveWallDisplay -Screens @(Get-LiveWallScreens) -RequestedDeviceName $context.Monitor
+  $context = Get-LiveWallExternalTvContext -Root $Root; $selection = Resolve-LiveWallRoleDisplay -Screens @(Get-LiveWallScreens) -RequestedDeviceName $context.Monitor -Role 'external-tv'
   New-Item -ItemType Directory -Path $context.ProfilePath -Force | Out-Null
   $sessionToken = [guid]::NewGuid().ToString('N')
   $geometry = Get-LiveWallSplitViewGeometry -Screen $selection.Screen -Placement $Placement -Ratio $Ratio
@@ -257,6 +257,29 @@ function Select-LiveWallDisplay {
   [pscustomobject]@{ Screen = $selected; FallbackUsed = $fallback }
 }
 
+# Windows can renumber display paths after a GPU or monitor-topology refresh.
+# Preserve LiveWall's configured roles only when the replacement is unambiguous:
+# Admin uses the sole primary display; Wall and External TV use the sole secondary.
+function Resolve-LiveWallRoleDisplay {
+  param(
+    [Parameter(Mandatory = $true)][object[]]$Screens,
+    [Parameter(Mandatory = $true)][string]$RequestedDeviceName,
+    [ValidateSet('admin','wall','external-tv')][string]$Role
+  )
+  $exact = Select-LiveWallDisplay -Screens $Screens -RequestedDeviceName $RequestedDeviceName
+  if (-not $exact.FallbackUsed) { return $exact }
+  if ($Role -eq 'admin') {
+    $candidates = @($Screens | Where-Object { $_.Primary })
+  } else {
+    $candidates = @($Screens | Where-Object { -not $_.Primary })
+  }
+  if ($candidates.Count -eq 1) {
+    return [pscustomobject]@{ Screen = $candidates[0]; FallbackUsed = $true; RoleRecovered = $true }
+  }
+  $exact | Add-Member -NotePropertyName RoleRecovered -NotePropertyValue $false
+  $exact
+}
+
 function Find-LiveWallBrowser {
   param(
     [ValidateSet('chrome', 'edge')][string]$Preferred = 'chrome',
@@ -327,6 +350,7 @@ function New-LiveWallAdminArguments {
     '--no-default-browser-check',
     '--disable-background-mode',
     '--new-window',
+    '--start-maximized',
     "--window-position=$($Screen.WorkingArea.X),$($Screen.WorkingArea.Y)",
     "--window-size=$($Screen.WorkingArea.Width),$($Screen.WorkingArea.Height)",
     $Url
@@ -548,7 +572,7 @@ function Open-LiveWallDedicatedWall {
   )
   $context = Get-LiveWallWallContext -Root $Root
   $screens = @(Get-LiveWallScreens)
-  $selection = Select-LiveWallDisplay -Screens $screens -RequestedDeviceName ([string]$context.Config.wallDisplay)
+  $selection = Resolve-LiveWallRoleDisplay -Screens $screens -RequestedDeviceName ([string]$context.Config.wallDisplay) -Role 'wall'
   New-Item -ItemType Directory -Path $context.ProfilePath -Force | Out-Null
   $path = Get-LiveWallWallSessionPath -Root $Root
   if (Test-Path -LiteralPath $path -PathType Leaf) {

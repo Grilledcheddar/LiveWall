@@ -51,9 +51,12 @@ import {
   reorderTile,
   replaceTileSource,
   playNextSource,
+  insertQueueSource,
+  playNowQueueSource,
   recordSourceInState,
   selectActiveAudio,
 } from '../lib/state';
+import { previewYouTubePlaylist } from '../lib/youtube-playlist-preview';
 import { fallbackTitle, finalizeTitle, resolveYouTubeTitle } from '../lib/titles';
 import {
   defaultStartBehavior,
@@ -515,7 +518,12 @@ function TileCard({
   moveUpDisabled: boolean;
   moveDownDisabled: boolean;
   onDragStart: (event: DragEvent<HTMLButtonElement>) => void;
-  onQueue: (source: VideoSource, playback: PlaybackStart) => Promise<unknown>;
+  onQueue: (
+    source: VideoSource,
+    playback: PlaybackStart,
+    action: 'now' | 'next' | 'append',
+    title?: string,
+  ) => Promise<unknown>;
   onPlayNext: () => Promise<unknown>;
   libraryEntry?: import('../lib/types').LibrarySource;
   onSaveToLibrary: (trigger: HTMLElement) => void;
@@ -538,6 +546,7 @@ function TileCard({
   const [volumeDraft, setVolumeDraft] = useState(tile.volume);
   const [queueBehavior, setQueueBehavior] = useState<PlaybackStart['behavior']>('resume');
   const [queueSpecificTime, setQueueSpecificTime] = useState('');
+  const [queueAction, setQueueAction] = useState<'now' | 'next' | 'append'>('append');
   const volumeTimer = useRef<number | undefined>(undefined);
   const latestVolume = useRef(tile.volume);
   const controllable = tile.source.type !== 'website';
@@ -578,10 +587,29 @@ function TileCard({
         queueBehavior === 'specific' ? parseTimestamp(queueSpecificTime) : undefined;
       if (queueBehavior === 'specific' && specificTime === undefined)
         throw new Error('Enter a valid queued start time.');
-      await onQueue(
-        source,
-        normalizePlaybackStart({ behavior: queueBehavior, specificTime }, source),
-      );
+      const playback = normalizePlaybackStart({ behavior: queueBehavior, specificTime }, source);
+      if (source.type === 'youtube-playlist') {
+        const preview = await previewYouTubePlaylist(queueUrl, playback);
+        const proposed = preview.entries
+          .map((entry, index) => `${index + 1}. ${entry.title}`)
+          .join('\n');
+        const verb = queueAction === 'append' ? 'append' : 'replace/insert';
+        if (
+          !confirm(
+            `YouTube playlist preview (${preview.entries.length} items)\n\n${proposed}\n\nConfirm to ${verb} this tile queue?`,
+          )
+        )
+          return;
+        const entries = queueAction === 'next' ? [...preview.entries].reverse() : preview.entries;
+        for (const [index, entry] of entries.entries()) {
+          // Inserting a playlist "next" must work back-to-front so existing queue entries
+          // remain after the complete imported playlist rather than between its videos.
+          const action = queueAction === 'next' ? 'next' : index === 0 ? queueAction : 'append';
+          await onQueue(entry.source, entry.playback, action, entry.title);
+        }
+      } else {
+        await onQueue(source, playback, queueAction);
+      }
       setQueueUrl('');
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Invalid source URL.');
@@ -941,11 +969,11 @@ function TileCard({
         <div className="section-label">
           <ListVideo size={14} /> UP NEXT
         </div>
-        {tile.queuedSource ? (
+        {(tile.queue ?? []).slice((tile.queuePosition ?? 0) + 1).length ? (
           <div className="queued-source">
             <div>
-              <strong>{tile.queuedSource.type.toUpperCase()}</strong>
-              <small>{tile.queuedSource.url}</small>
+              <strong>{(tile.queue ?? [])[(tile.queuePosition ?? 0) + 1]?.title}</strong>
+              <small>{(tile.queue ?? [])[(tile.queuePosition ?? 0) + 1]?.source.url}</small>
             </div>
             {tile.scheduledAt && <Countdown timestamp={tile.scheduledAt} />}
           </div>
@@ -960,14 +988,29 @@ function TileCard({
             placeholder="Paste next source URL"
           />
           <Button
-            variant="secondary"
+            variant="primary"
             onClick={queue}
             disabled={!queueUrl}
-            title={!queueUrl ? 'Paste a source URL before queueing.' : 'Queue this source'}
+            title={!queueUrl ? 'Paste a source URL first.' : 'Apply queue action'}
           >
-            Queue
+            {queueAction === 'now'
+              ? 'Play now'
+              : queueAction === 'next'
+                ? 'Play next'
+                : 'Add to queue'}
           </Button>
         </div>
+        <label>
+          Queue action
+          <select
+            value={queueAction}
+            onChange={(event) => setQueueAction(event.target.value as typeof queueAction)}
+          >
+            <option value="now">Play now</option>
+            <option value="next">Play next</option>
+            <option value="append">Add to queue</option>
+          </select>
+        </label>
         <div className="queued-playback-settings">
           <label>
             Queued start
@@ -992,7 +1035,7 @@ function TileCard({
             />
           )}
         </div>
-        {tile.queuedSource && (
+        {(tile.queue?.length ?? 0) > 1 && (
           <div className="queue-actions">
             <Button variant="primary" className="play-next" onClick={() => void onPlayNext()}>
               <ChevronRight size={16} /> Play Next
@@ -1020,6 +1063,7 @@ function TileCard({
               onClick={() =>
                 onSave((current) => ({
                   ...current,
+                  queue: current.queue?.slice(0, (current.queuePosition ?? 0) + 1),
                   queuedSource: undefined,
                   scheduledAt: undefined,
                 }))
@@ -1029,6 +1073,92 @@ function TileCard({
             </Button>
           </div>
         )}
+        <div className="queue-items" aria-label={`Queue for ${tile.name}`}>
+          {(tile.queue ?? []).slice((tile.queuePosition ?? 0) + 1).map((entry, index, upcoming) => (
+            <div key={entry.id} className="queued-source">
+              <div>
+                <strong>
+                  {index + 1}. {entry.title}
+                </strong>
+                <small>{entry.reason ?? entry.source.url}</small>
+              </div>
+              <div className="queue-actions">
+                <Button
+                  variant="ghost"
+                  disabled={index === 0}
+                  onClick={() =>
+                    void onSave((current) => {
+                      const queue = [...(current.queue ?? [])];
+                      const at = queue.findIndex((item) => item.id === entry.id);
+                      [queue[at], queue[at - 1]] = [queue[at - 1], queue[at]];
+                      return { ...current, queue };
+                    })
+                  }
+                >
+                  Move Up
+                </Button>
+                <Button
+                  variant="ghost"
+                  disabled={index === upcoming.length - 1}
+                  onClick={() =>
+                    void onSave((current) => {
+                      const queue = [...(current.queue ?? [])];
+                      const at = queue.findIndex((item) => item.id === entry.id);
+                      [queue[at], queue[at + 1]] = [queue[at + 1], queue[at]];
+                      return { ...current, queue };
+                    })
+                  }
+                >
+                  Move Down
+                </Button>
+                <Button
+                  variant="ghost"
+                  onClick={() =>
+                    void onSave((current) => ({
+                      ...current,
+                      queue: current.queue?.filter((item) => item.id !== entry.id),
+                    }))
+                  }
+                >
+                  Remove
+                </Button>
+                {entry.status !== 'ready' && (
+                  <>
+                    <Button
+                      variant="ghost"
+                      onClick={() =>
+                        void onSave((current) => ({
+                          ...current,
+                          queue: current.queue?.filter((item) => item.id !== entry.id),
+                        }))
+                      }
+                    >
+                      Skip
+                    </Button>
+                    <a href={entry.source.url} target="_blank" rel="noreferrer">
+                      Open Externally
+                    </a>
+                  </>
+                )}
+              </div>
+            </div>
+          ))}
+          {(tile.queue?.length ?? 0) > 1 && (
+            <Button
+              variant="ghost"
+              onClick={() => {
+                if (confirm('Clear all remaining queue items?'))
+                  void onSave((current) => ({
+                    ...current,
+                    queue: current.queue?.slice(0, (current.queuePosition ?? 0) + 1),
+                    scheduledAt: undefined,
+                  }));
+              }}
+            >
+              Clear remaining queue
+            </Button>
+          )}
+        </div>
       </div>
       <footer>
         <Button variant="secondary" onClick={onFocus}>
@@ -1521,7 +1651,13 @@ export function AdminPage() {
             <span>ACTIVE TILES</span>
           </div>
           <div>
-            <strong>{state.tiles.filter((tile) => tile.queuedSource).length}</strong>
+            <strong>
+              {
+                state.tiles.filter(
+                  (tile) => (tile.queue?.length ?? 0) > (tile.queuePosition ?? 0) + 1,
+                ).length
+              }
+            </strong>
             <span>QUEUED</span>
           </div>
           <div>
@@ -1806,27 +1942,19 @@ export function AdminPage() {
                     event.dataTransfer.effectAllowed = 'move';
                     event.dataTransfer.setData('text/plain', tile.id);
                   }}
-                  onQueue={(source, playback) =>
+                  onQueue={(source, playback, action, title) =>
                     patchState((current) => {
-                      const recorded = recordSourceInState(
+                      const entryTitle = title ?? source.youtubeId ?? new URL(source.url).hostname;
+                      if (action === 'now')
+                        return playNowQueueSource(current, tile.id, source, entryTitle, playback);
+                      return insertQueueSource(
                         current,
+                        tile.id,
                         source,
-                        source.youtubeId || new URL(source.url).hostname,
-                        'manual',
+                        entryTitle,
+                        action === 'next' ? 'next' : 'append',
+                        playback,
                       );
-                      return {
-                        ...recorded,
-                        tiles: recorded.tiles.map((candidate) =>
-                          candidate.id === tile.id
-                            ? {
-                                ...candidate,
-                                queuedSource: source,
-                                queuedPlayback: playback,
-                                scheduledAt: undefined,
-                              }
-                            : candidate,
-                        ),
-                      };
                     })
                   }
                   onPlayNext={() => patchState((current) => playNextSource(current, tile.id))}

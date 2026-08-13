@@ -8,6 +8,19 @@ export interface PlaybackStart {
   specificTime?: number;
 }
 
+export type QueueEntryStatus = 'ready' | 'unsupported' | 'external-only';
+
+/** A stable item in a tile's single, ordered playback timeline. */
+export interface QueueEntry {
+  id: string;
+  source: VideoSource;
+  playback: PlaybackStart;
+  title: string;
+  titleMode: 'auto' | 'manual';
+  status: QueueEntryStatus;
+  reason?: string;
+}
+
 export interface VideoSource {
   url: string;
   type: SourceType;
@@ -31,6 +44,10 @@ export interface Tile {
   queuedSource?: VideoSource;
   queuedPlayback?: PlaybackStart;
   scheduledAt?: number;
+  /** Current item plus upcoming items. Legacy queuedSource is migrated here. */
+  queue?: QueueEntry[];
+  /** Index of the active queue item, persisted for restart recovery. */
+  queuePosition?: number;
   x: number;
   y: number;
   w: number;
@@ -198,7 +215,7 @@ export interface WallPresetFile {
 }
 
 export interface WallState {
-  schemaVersion: 4;
+  schemaVersion: 5;
   version: number;
   updatedAt: number;
   layoutMode: 'automatic' | 'freeform' | 'template';

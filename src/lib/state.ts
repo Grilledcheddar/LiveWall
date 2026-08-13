@@ -1,6 +1,7 @@
 import type {
   OverlayMode,
   PlaybackStart,
+  QueueEntry,
   Tile,
   VideoSource,
   WallAppearance,
@@ -23,7 +24,7 @@ export const DEFAULT_APPEARANCE: Readonly<WallAppearance> = Object.freeze({
 });
 
 export const emptyState = (): WallState => ({
-  schemaVersion: 4,
+  schemaVersion: 5,
   version: 0,
   updatedAt: Date.now(),
   layoutMode: 'automatic',
@@ -142,6 +143,128 @@ function normalizeVideoSource(value: unknown, label: string): VideoSource {
   };
 }
 
+function queueStatus(source: VideoSource): Pick<QueueEntry, 'status' | 'reason'> {
+  const policy = getEmbedPolicy(source);
+  if (policy?.externalOnly) return { status: 'external-only', reason: policy.message };
+  return { status: 'ready' };
+}
+
+function newQueueEntry(
+  source: VideoSource,
+  playback: PlaybackStart | undefined,
+  title: string,
+  titleMode: Tile['titleMode'],
+  id: string = crypto.randomUUID(),
+): QueueEntry {
+  return {
+    id,
+    source,
+    playback: normalizePlaybackStart(playback, source),
+    title,
+    titleMode: titleMode === 'auto' ? 'auto' : 'manual',
+    ...queueStatus(source),
+  };
+}
+
+function normalizeQueueEntry(value: unknown, label: string): QueueEntry | undefined {
+  if (!isRecord(value)) return undefined;
+  try {
+    const source = normalizeVideoSource(value.source, label);
+    const title =
+      typeof value.title === 'string' && value.title.trim()
+        ? value.title.trim()
+        : source.youtubeId || new URL(source.url).hostname;
+    const normalized = newQueueEntry(
+      source,
+      value.playback as PlaybackStart | undefined,
+      title,
+      value.titleMode === 'auto' ? 'auto' : 'manual',
+      typeof value.id === 'string' && value.id ? value.id : crypto.randomUUID(),
+    );
+    if (value.status === 'unsupported' && typeof value.reason === 'string')
+      return { ...normalized, status: 'unsupported', reason: value.reason };
+    return normalized;
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizeTileQueue(
+  candidate: Record<string, unknown>,
+  source: VideoSource,
+  name: string,
+  titleMode: Tile['titleMode'],
+) {
+  const supplied = Array.isArray(candidate.queue)
+    ? candidate.queue
+        .map((entry, index) => normalizeQueueEntry(entry, `Saved queue item ${index + 1}`))
+        .filter((entry): entry is QueueEntry => Boolean(entry))
+    : [];
+  if (supplied.length) {
+    const position =
+      typeof candidate.queuePosition === 'number' && Number.isSafeInteger(candidate.queuePosition)
+        ? Math.min(Math.max(0, candidate.queuePosition), supplied.length - 1)
+        : 0;
+    // The persisted source remains the player input; keep it synchronized to the active entry.
+    const active = newQueueEntry(
+      source,
+      candidate.playback as PlaybackStart | undefined,
+      name,
+      titleMode,
+      supplied[position].id,
+    );
+    supplied[position] = active;
+    return { queue: supplied, queuePosition: position, source, playback: active.playback };
+  }
+  const current = newQueueEntry(
+    source,
+    candidate.playback as PlaybackStart | undefined,
+    name,
+    titleMode,
+  );
+  let legacy: QueueEntry | undefined;
+  if (candidate.queuedSource) {
+    try {
+      const legacySource = normalizeVideoSource(candidate.queuedSource, 'Saved legacy queue item');
+      legacy = newQueueEntry(
+        legacySource,
+        candidate.queuedPlayback as PlaybackStart | undefined,
+        legacySource.youtubeId || new URL(legacySource.url).hostname,
+        'manual',
+      );
+    } catch {
+      legacy = undefined;
+    }
+  }
+  return {
+    queue: legacy ? [current, legacy] : [current],
+    queuePosition: 0,
+    source,
+    playback: current.playback,
+  };
+}
+
+function timelineForTile(tile: Tile): { queue: QueueEntry[]; position: number } {
+  if (tile.queue?.length) {
+    const position = Math.min(Math.max(0, tile.queuePosition ?? 0), tile.queue.length - 1);
+    return { queue: tile.queue, position };
+  }
+  const current = newQueueEntry(tile.source, tile.playback, tile.name, tile.titleMode);
+  if (!tile.queuedSource) return { queue: [current], position: 0 };
+  return {
+    queue: [
+      current,
+      newQueueEntry(
+        tile.queuedSource,
+        tile.queuedPlayback,
+        tile.queuedSource.youtubeId || new URL(tile.queuedSource.url).hostname,
+        'manual',
+      ),
+    ],
+    position: 0,
+  };
+}
+
 export function normalizeWallState(input: unknown): WallState {
   if (!isRecord(input) || !Array.isArray(input.tiles)) {
     throw new Error('Saved state has an invalid shape.');
@@ -168,21 +291,20 @@ export function normalizeWallState(input: unknown): WallState {
         ? candidate.displayOrder
         : index;
     const source = normalizeVideoSource(candidate.source, `Saved tile ${index + 1}`);
-    const queuedSource = candidate.queuedSource
-      ? normalizeVideoSource(candidate.queuedSource, `Saved tile ${index + 1} queue`)
-      : undefined;
+    const titleMode = candidate.titleMode === 'auto' ? ('auto' as const) : ('manual' as const);
+    const queue = normalizeTileQueue(candidate, source, String(candidate.name), titleMode);
     return {
       index,
       requestedOrder,
       tile: {
         ...candidate,
-        source,
-        queuedSource,
-        queuedPlayback: queuedSource
-          ? normalizePlaybackStart(candidate.queuedPlayback, queuedSource)
-          : undefined,
-        playback: normalizePlaybackStart(candidate.playback, source),
-        titleMode: candidate.titleMode === 'auto' ? ('auto' as const) : ('manual' as const),
+        source: queue.source,
+        queuedSource: undefined,
+        queuedPlayback: undefined,
+        queue: queue.queue,
+        queuePosition: queue.queuePosition,
+        playback: queue.playback,
+        titleMode,
         displayOrder: requestedOrder,
         resumePosition:
           typeof candidate.resumePosition === 'number' &&
@@ -205,7 +327,7 @@ export function normalizeWallState(input: unknown): WallState {
   const tileIds = new Set(tiles.map((tile) => tile.id));
   return {
     ...input,
-    schemaVersion: 4,
+    schemaVersion: 5,
     version:
       typeof input.version === 'number' && Number.isFinite(input.version) ? input.version : 0,
     updatedAt:
@@ -311,19 +433,17 @@ export function reconcileTimers(state: WallState, now = Date.now()): WallState {
   let changed = false;
   let library = state.library;
   const tiles = state.tiles.map((tile) => {
-    if (tile.queuedSource && tile.scheduledAt && tile.scheduledAt <= now) {
+    const timeline = timelineForTile(tile);
+    const nextEntry = timeline.queue[timeline.position + 1];
+    if (nextEntry && tile.scheduledAt && tile.scheduledAt <= now) {
       changed = true;
-      library = recordLibraryUse(
-        library,
-        tile.queuedSource,
-        tile.queuedSource.youtubeId || new URL(tile.queuedSource.url).hostname,
-        'manual',
-        now,
-      );
+      library = recordLibraryUse(library, nextEntry.source, nextEntry.title, 'manual', now);
       return {
         ...tile,
-        source: tile.queuedSource,
-        playback: normalizePlaybackStart(tile.queuedPlayback, tile.queuedSource),
+        source: nextEntry.source,
+        playback: nextEntry.playback,
+        queue: timeline.queue,
+        queuePosition: timeline.position + 1,
         queuedSource: undefined,
         queuedPlayback: undefined,
         scheduledAt: undefined,
@@ -377,7 +497,7 @@ export function queueSourceForTile(
   playback?: PlaybackStart,
 ): WallState {
   const tile = state.tiles.find((candidate) => candidate.id === tileId);
-  if (!tile || (tile.queuedSource && !replaceExisting)) return state;
+  if (!tile) return state;
   const recorded = recordSourceInState(state, source, title, titleMode, now);
   return {
     ...recorded,
@@ -385,8 +505,168 @@ export function queueSourceForTile(
       candidate.id === tileId
         ? {
             ...candidate,
-            queuedSource: source,
-            queuedPlayback: normalizePlaybackStart(playback, source),
+            queue: (() => {
+              const timeline = timelineForTile(candidate);
+              return replaceExisting
+                ? [
+                    ...timeline.queue.slice(0, timeline.position + 1),
+                    newQueueEntry(source, playback, title, titleMode),
+                  ]
+                : [...timeline.queue, newQueueEntry(source, playback, title, titleMode)];
+            })(),
+            queuePosition: timelineForTile(candidate).position,
+            queuedSource: undefined,
+            queuedPlayback: undefined,
+            scheduledAt: undefined,
+          }
+        : candidate,
+    ),
+  };
+}
+
+export function insertQueueSource(
+  state: WallState,
+  tileId: string,
+  source: VideoSource,
+  title: string,
+  placement: 'next' | 'append',
+  playback?: PlaybackStart,
+  titleMode: Tile['titleMode'] = 'manual',
+  now = Date.now(),
+): WallState {
+  const tile = state.tiles.find((candidate) => candidate.id === tileId);
+  if (!tile) return state;
+  const entry = newQueueEntry(source, playback, title, titleMode);
+  const timeline = timelineForTile(tile);
+  const index = placement === 'next' ? timeline.position + 1 : timeline.queue.length;
+  const recorded = recordSourceInState(state, source, title, titleMode, now);
+  return {
+    ...recorded,
+    tiles: recorded.tiles.map((candidate) => {
+      if (candidate.id !== tileId) return candidate;
+      const queue = [...timelineForTile(candidate).queue];
+      queue.splice(index, 0, entry);
+      return { ...candidate, queue, queuePosition: timelineForTile(candidate).position };
+    }),
+  };
+}
+
+export function playNowQueueSource(
+  state: WallState,
+  tileId: string,
+  source: VideoSource,
+  title: string,
+  playback?: PlaybackStart,
+  titleMode: Tile['titleMode'] = 'manual',
+  now = Date.now(),
+): WallState {
+  const tile = state.tiles.find((candidate) => candidate.id === tileId);
+  if (!tile) return state;
+  const entry = newQueueEntry(source, playback, title, titleMode);
+  const recorded = recordSourceInState(state, source, title, titleMode, now);
+  return {
+    ...recorded,
+    tiles: recorded.tiles.map((candidate) => {
+      if (candidate.id !== tileId) return candidate;
+      const timeline = timelineForTile(candidate);
+      const position = timeline.position;
+      const queue = [...timeline.queue];
+      queue[position] = entry;
+      return {
+        ...candidate,
+        source,
+        playback: entry.playback,
+        queue,
+        queuePosition: position,
+        playlistIndex: undefined,
+        resumePosition: undefined,
+        scheduledAt: undefined,
+      };
+    }),
+  };
+}
+
+export function moveQueueEntry(
+  state: WallState,
+  tileId: string,
+  entryId: string,
+  direction: -1 | 1,
+): WallState {
+  return {
+    ...state,
+    tiles: state.tiles.map((tile) => {
+      if (tile.id !== tileId) return tile;
+      const timeline = timelineForTile(tile);
+      const index = timeline.queue.findIndex((entry) => entry.id === entryId);
+      const target = index + direction;
+      if (
+        index <= timeline.position ||
+        target <= timeline.position ||
+        target >= timeline.queue.length
+      )
+        return tile;
+      const queue = [...timeline.queue];
+      [queue[index], queue[target]] = [queue[target], queue[index]];
+      return { ...tile, queue };
+    }),
+  };
+}
+
+export function removeQueueEntry(state: WallState, tileId: string, entryId: string): WallState {
+  return {
+    ...state,
+    tiles: state.tiles.map((tile) => {
+      if (tile.id !== tileId) return tile;
+      const timeline = timelineForTile(tile);
+      const index = timeline.queue.findIndex((entry) => entry.id === entryId);
+      if (index < 0 || index <= timeline.position) return tile;
+      return { ...tile, queue: timeline.queue.filter((entry) => entry.id !== entryId) };
+    }),
+  };
+}
+
+export function clearRemainingQueue(state: WallState, tileId: string): WallState {
+  return {
+    ...state,
+    tiles: state.tiles.map((tile) =>
+      tile.id === tileId
+        ? {
+            ...tile,
+            queue: timelineForTile(tile).queue.slice(0, timelineForTile(tile).position + 1),
+            scheduledAt: undefined,
+          }
+        : tile,
+    ),
+  };
+}
+
+/** Advances only the target tile, skipping entries that cannot be played on the Wall. */
+export function advanceQueueOnCompletion(
+  state: WallState,
+  tileId: string,
+  now = Date.now(),
+): WallState {
+  const tile = state.tiles.find((candidate) => candidate.id === tileId);
+  if (!tile) return state;
+  const timeline = timelineForTile(tile);
+  const index = timeline.queue.findIndex(
+    (entry, candidateIndex) => candidateIndex > timeline.position && entry.status === 'ready',
+  );
+  if (index < 0) return state;
+  const entry = timeline.queue[index];
+  const recorded = recordSourceInState(state, entry.source, entry.title, entry.titleMode, now);
+  return {
+    ...recorded,
+    tiles: recorded.tiles.map((candidate) =>
+      candidate.id === tileId
+        ? {
+            ...candidate,
+            source: entry.source,
+            playback: entry.playback,
+            queue: timeline.queue,
+            queuePosition: index,
+            resumePosition: undefined,
+            playlistIndex: undefined,
             scheduledAt: undefined,
           }
         : candidate,
@@ -396,25 +676,24 @@ export function queueSourceForTile(
 
 export function playNextSource(state: WallState, tileId: string, now = Date.now()): WallState {
   const tile = state.tiles.find((candidate) => candidate.id === tileId);
-  if (!tile?.queuedSource) return state;
-  const next = recordSourceInState(
-    state,
-    tile.queuedSource,
-    tile.queuedSource.youtubeId || new URL(tile.queuedSource.url).hostname,
-    'manual',
-    now,
-  );
+  const timeline = tile ? timelineForTile(tile) : undefined;
+  const position = timeline?.position ?? 0;
+  const nextEntry = timeline?.queue[position + 1];
+  if (!tile || !nextEntry) return state;
+  const next = recordSourceInState(state, nextEntry.source, nextEntry.title, 'manual', now);
   return {
     ...next,
     tiles: next.tiles.map((candidate) =>
       candidate.id === tileId
         ? {
             ...candidate,
-            source: candidate.queuedSource!,
-            playback: normalizePlaybackStart(candidate.queuedPlayback, candidate.queuedSource!),
+            source: nextEntry.source,
+            playback: nextEntry.playback,
             queuedSource: undefined,
             queuedPlayback: undefined,
             scheduledAt: undefined,
+            queue: timeline!.queue,
+            queuePosition: position + 1,
             resumePosition: undefined,
           }
         : candidate,

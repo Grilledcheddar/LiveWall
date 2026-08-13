@@ -87,7 +87,8 @@ test('P4 generic embed profiles are exact and External TV suspends then restores
   await card.getByRole('button', { name: 'Watch on Wall' }).click();
   await expect(admin.getByText('External TV Mode is active', { exact: false })).toBeVisible();
   await expect(wall.getByRole('heading', { name: 'External TV Mode is active.' })).toBeVisible();
-  await admin.getByRole('button', { name: 'Close External TV & Return to Wall' }).click();
+  await admin.getByRole('button', { name: 'Return to full Wall' }).click();
+  await expect(admin.getByText('External TV Mode is active', { exact: false })).toHaveCount(0);
   await expect(wall.locator('.player-tile')).toHaveCount(2);
   await context.close();
 });
@@ -237,7 +238,7 @@ test('Save Source dialog and disabled controls remain usable at reduced viewport
     await expect(
       admin.getByRole(name === 'Export' ? 'link' : 'button', { name }).first(),
     ).toBeVisible();
-  await expect(admin.getByRole('button', { name: 'Queue' }).first()).toBeVisible();
+  await expect(admin.getByRole('button', { name: 'Add to queue' }).first()).toBeVisible();
 
   const disabledStyles = await admin.locator('button:disabled').evaluateAll((buttons) => {
     const rgb = (value: string) => (value.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number);
@@ -541,7 +542,7 @@ test('Admin controls the open Wall and state survives reload', async ({ browser,
   const firstCard = admin.locator('[data-testid="admin-tile"]').first();
 
   await firstCard.getByLabel(/Queue URL/).fill('https://mock.livewall.local/?label=queued');
-  await firstCard.getByRole('button', { name: 'Queue' }).click();
+  await firstCard.getByRole('button', { name: 'Add to queue' }).click();
 
   await firstCard.getByRole('button', { name: 'Replace Now' }).click();
   await admin.getByLabel('Replacement URL').fill('https://mock.livewall.local/?label=replaced');
@@ -552,12 +553,12 @@ test('Admin controls the open Wall and state survives reload', async ({ browser,
     'data-instance-id',
     secondInstance!,
   );
-  await expect(firstCard.locator('.queued-source')).toContainText('queued');
+  await expect(firstCard.locator('.queued-source').first()).toContainText('queued');
   await firstCard.getByRole('button', { name: 'Play Next' }).click();
   await expect(wall.locator('.mock-player').first()).toContainText('queued');
 
   await firstCard.getByLabel(/Queue URL/).fill('https://mock.livewall.local/?label=timed');
-  await firstCard.getByRole('button', { name: 'Queue' }).click();
+  await firstCard.getByRole('button', { name: 'Add to queue' }).click();
   await firstCard.locator('.queue-actions input[type="number"]').fill('1');
   await firstCard.getByRole('button', { name: 'Schedule' }).click();
   await expect(wall.locator('.mock-player').first()).toContainText('timed', { timeout: 5000 });
@@ -1245,7 +1246,7 @@ test('production LiveWall Button variants own every application button state', a
     .locator('[data-testid="admin-tile"]')
     .filter({ hasText: 'Styled Playlist' });
   const clearPosition = playlist.getByRole('button', { name: 'Clear Saved Position' });
-  const disabledQueue = playlist.getByRole('button', { name: 'Queue' });
+  const disabledQueue = playlist.getByRole('button', { name: 'Add to queue' });
   const restart = playlist.getByRole('button', { name: 'Restart' });
   const previous = playlist.getByRole('button', { name: 'Previous Video' });
   const next = playlist.getByRole('button', { name: 'Next Video' });

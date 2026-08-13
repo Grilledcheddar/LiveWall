@@ -2,9 +2,13 @@ import { describe, expect, it } from 'vitest';
 import legacyState from '../test/fixtures/legacy-pre-p1.json';
 import {
   automaticGrid,
+  advanceQueueOnCompletion,
   addSourceAsTile,
+  clearRemainingQueue,
+  insertQueueSource,
   emptyState,
   migrateState,
+  moveQueueEntry,
   moveTile,
   newTile,
   normalizeAppearance,
@@ -14,8 +18,10 @@ import {
   reconcileTimers,
   replaceTileSource,
   playNextSource,
+  playNowQueueSource,
   queueSourceForTile,
   recordSourceInState,
+  removeQueueEntry,
   selectActiveAudio,
 } from './state';
 import type { VideoSource } from './types';
@@ -92,7 +98,11 @@ describe('state rules', () => {
     const tile = { ...newTile('A', source('old')), queuedSource: source('new'), scheduledAt: 100 };
     const result = reconcileTimers({ ...emptyState(), tiles: [tile] }, 101);
     expect(result.tiles[0].source.url).toContain('new');
-    expect(result.tiles[0].queuedSource).toBeUndefined();
+    expect(result.tiles[0].queue?.map((entry) => entry.source.url)).toEqual([
+      source('old').url,
+      source('new').url,
+    ]);
+    expect(result.tiles[0].queuePosition).toBe(1);
   });
   it('keeps future timers intact', () => {
     const tile = { ...newTile('A', source('old')), queuedSource: source('new'), scheduledAt: 200 };
@@ -142,7 +152,11 @@ describe('state rules', () => {
       h: 6,
     });
     expect(migrated.source).toEqual(legacy.source);
-    expect(migrated.queuedSource).toEqual(legacy.queuedSource);
+    expect(migrated.queuedSource).toBeUndefined();
+    expect(migrated.queue?.map((entry) => entry.source)).toEqual([
+      legacy.source,
+      legacy.queuedSource,
+    ]);
   });
 
   it('Replace Now changes only the chosen tile and preserves its queue', () => {
@@ -322,19 +336,81 @@ describe('state rules', () => {
     expect(state.library.entries).toHaveLength(0);
   });
 
-  it('preserves or explicitly replaces an existing queue', () => {
+  it('migrates a legacy single-item queue and appends or replaces upcoming items', () => {
     const tile = {
       ...newTile('Tile', source('current')),
       queuedSource: source('existing'),
       scheduledAt: 500,
     };
     const state = { ...emptyState(), tiles: [tile] };
-    expect(queueSourceForTile(state, tile.id, source('new'), 'New')).toBe(state);
+    const appended = queueSourceForTile(state, tile.id, source('new'), 'New');
+    expect(appended.tiles[0].queue?.map((entry) => entry.source.url)).toEqual([
+      source('current').url,
+      source('existing').url,
+      source('new').url,
+    ]);
     const replaced = queueSourceForTile(state, tile.id, source('new'), 'New', 'manual', true, 100);
-    expect(replaced.tiles[0]).toMatchObject({
-      queuedSource: source('new'),
-      scheduledAt: undefined,
-    });
+    expect(replaced.tiles[0].queue?.map((entry) => entry.source.url)).toEqual([
+      source('current').url,
+      source('new').url,
+    ]);
     expect(replaced.library.entries[0].title).toBe('New');
+  });
+
+  it('orders Play Now, Play Next, and Add to Queue on one target tile only', () => {
+    const first = newTile('First', source('first'));
+    const second = newTile('Second', source('second'));
+    const initial = { ...emptyState(), tiles: [first, second] };
+    const appended = insertQueueSource(initial, first.id, source('append'), 'Append', 'append');
+    const next = insertQueueSource(appended, first.id, source('next'), 'Next', 'next');
+    const played = playNowQueueSource(next, first.id, source('now'), 'Now');
+    expect(played.tiles[0].queue?.map((entry) => entry.title)).toEqual(['Now', 'Next', 'Append']);
+    expect(played.tiles[0].source).toEqual(source('now'));
+    expect(played.tiles[1]).toBe(second);
+  });
+
+  it('reorders, removes, clears, and persists remaining queue entries', () => {
+    const tile = newTile('Tile', source('current'));
+    const initial = insertQueueSource(
+      insertQueueSource(
+        { ...emptyState(), tiles: [tile] },
+        tile.id,
+        source('one'),
+        'One',
+        'append',
+      ),
+      tile.id,
+      source('two'),
+      'Two',
+      'append',
+    );
+    const entries = initial.tiles[0].queue!;
+    const moved = moveQueueEntry(initial, tile.id, entries[2].id, -1);
+    expect(moved.tiles[0].queue?.map((entry) => entry.title)).toEqual(['Tile', 'Two', 'One']);
+    const removed = removeQueueEntry(moved, tile.id, entries[1].id);
+    expect(removed.tiles[0].queue?.map((entry) => entry.title)).toEqual(['Tile', 'Two']);
+    const cleared = clearRemainingQueue(removed, tile.id);
+    expect(cleared.tiles[0].queue).toHaveLength(1);
+    expect(normalizeWallState(cleared).tiles[0].queue).toHaveLength(1);
+  });
+
+  it('advances past unsupported or external-only entries and stops cleanly at queue end', () => {
+    const tile = newTile('Tile', source('current'));
+    const queued = insertQueueSource(
+      insertQueueSource(
+        { ...emptyState(), tiles: [tile] },
+        tile.id,
+        { type: 'website', url: 'https://web.weatherwise.app/#map=1' },
+        'Weatherwise',
+        'append',
+      ),
+      tile.id,
+      source('valid'),
+      'Valid',
+      'append',
+    );
+    const advanced = advanceQueueOnCompletion(queued, tile.id);
+    expect(advanced.tiles[0]).toMatchObject({ source: source('valid'), queuePosition: 2 });
+    expect(advanceQueueOnCompletion(advanced, tile.id)).toBe(advanced);
   });
 });

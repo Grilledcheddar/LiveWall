@@ -107,6 +107,7 @@ Describe 'LiveWall browser discovery and arguments' {
     ($wall -contains '--window-size=1920,1080') | Should Be $true
     ($wall -contains '--user-data-dir="C:\LiveWall Data\wall"') | Should Be $true
     ($admin -contains '--new-window') | Should Be $true
+    ($admin -contains '--start-maximized') | Should Be $true
     ($admin -contains '--window-size=1920,1040') | Should Be $true
     ($admin -contains '--user-data-dir="C:\LiveWall Data\admin"') | Should Be $true
   }
@@ -127,6 +128,17 @@ Describe 'LiveWall browser discovery and arguments' {
     ($args -join ' ') | Should Match '--user-data-dir='
     ($args -join ' ') | Should Match '--start-fullscreen'
     ($args -join ' ') | Should Not Match '--kiosk'
+  }
+
+  It 'recovers legacy Admin and Wall display identities by unambiguous roles' {
+    $primary = New-TestScreen '\\.\DISPLAY1' $true 0 0 2560 1440 0 0 2560 1400
+    $secondary = New-TestScreen '\\.\DISPLAY2' $false -720 -2160 3840 2160 -720 -2160 3840 2080
+    $admin = Resolve-LiveWallRoleDisplay -Screens @($primary, $secondary) -RequestedDeviceName '\\.\DISPLAY6' -Role admin
+    $wall = Resolve-LiveWallRoleDisplay -Screens @($primary, $secondary) -RequestedDeviceName '\\.\DISPLAY7' -Role wall
+    $admin.Screen.DeviceName | Should Be '\\.\DISPLAY1'
+    $wall.Screen.DeviceName | Should Be '\\.\DISPLAY2'
+    $admin.RoleRecovered | Should Be $true
+    $wall.RoleRecovered | Should Be $true
   }
 
   It 'derives split regions from the selected monitor working area' {

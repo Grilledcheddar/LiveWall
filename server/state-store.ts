@@ -5,7 +5,12 @@ import {
   normalizeSourceLibrary,
   previewLibraryImport,
 } from '../src/lib/library.js';
-import { emptyState, normalizeWallState, reconcileTimers } from '../src/lib/state.js';
+import {
+  advanceQueueOnCompletion,
+  emptyState,
+  normalizeWallState,
+  reconcileTimers,
+} from '../src/lib/state.js';
 import type { WallState } from '../src/lib/types.js';
 
 export class StateStore {
@@ -116,6 +121,22 @@ export class StateStore {
         };
         await this.persist();
       }
+      return this.get();
+    });
+  }
+
+  async advanceQueueOnCompletion(tileId: string, sourceUrl: string) {
+    return this.enqueue(async () => {
+      const tile = this.state.tiles.find((candidate) => candidate.id === tileId);
+      if (!tile || tile.source.url !== sourceUrl) return undefined;
+      const next = advanceQueueOnCompletion(this.state, tileId);
+      if (next === this.state) return undefined;
+      this.state = normalizeWallState({
+        ...next,
+        version: this.state.version + 1,
+        updatedAt: Date.now(),
+      });
+      await this.persist();
       return this.get();
     });
   }

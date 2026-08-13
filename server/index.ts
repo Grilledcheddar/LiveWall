@@ -25,8 +25,10 @@ import { detectSource } from '../src/lib/sources.js';
 const root = process.cwd();
 const port = Number(process.env.PORT || 4174);
 const host = '127.0.0.1';
-const store = new StateStore(path.join(root, 'data'));
-const dataDirectory = path.join(root, 'data');
+// Browser tests supply a disposable directory so fixtures can never touch the
+// installed wall, library, or playback data.
+const dataDirectory = process.env.LIVEWALL_DATA_DIR || path.join(root, 'data');
+const store = new StateStore(dataDirectory);
 const progressStore = new AtomicJsonStore<PlaybackProgressFile>(
   dataDirectory,
   'playback-progress.json',
@@ -360,6 +362,11 @@ app.post('/api/player-health', (req, res) => {
   }
   latestHealthByTile.set(health.tileId, health);
   broadcast({ type: 'health', health });
+  if (health.status === 'ended') {
+    void store.advanceQueueOnCompletion(health.tileId, health.sourceUrl).then((state) => {
+      if (state) broadcast({ type: 'state', state });
+    });
+  }
   res.status(202).json({ ok: true });
 });
 

@@ -1,14 +1,22 @@
 import { spawn } from 'node:child_process';
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 
 const root = process.cwd();
 const testPort = 4184;
 const testUrl = `http://127.0.0.1:${testPort}`;
+const testDataDirectory = await mkdtemp(path.join(os.tmpdir(), 'livewall-e2e-'));
 const server = spawn(process.execPath, [path.join(root, 'dist-server/server/index.js')], {
   cwd: root,
   stdio: 'inherit',
   windowsHide: true,
-  env: { ...process.env, PORT: String(testPort), LIVEWALL_TEST_WALL_CONTROL: '1' },
+  env: {
+    ...process.env,
+    PORT: String(testPort),
+    LIVEWALL_TEST_WALL_CONTROL: '1',
+    LIVEWALL_DATA_DIR: testDataDirectory,
+  },
 });
 
 async function waitForServer() {
@@ -55,6 +63,7 @@ try {
     new Promise((resolve) => setTimeout(resolve, 3_000)),
   ]);
   if (server.exitCode === null) server.kill('SIGKILL');
+  await rm(testDataDirectory, { recursive: true, force: true });
 }
 
 process.exitCode = exitCode;

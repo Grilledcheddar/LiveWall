@@ -3,7 +3,7 @@ import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { emptyState, newTile } from '../src/lib/state';
+import { emptyState, insertQueueSource, newTile } from '../src/lib/state';
 import { recordLibraryUse } from '../src/lib/library';
 import { StateStore } from './state-store';
 import legacyState from '../src/test/fixtures/legacy-pre-p1.json';
@@ -95,6 +95,42 @@ describe('StateStore', () => {
     expect(reopened.get().tiles.map((tile) => tile.resumePosition)).toEqual([12, 34]);
   });
 
+  it('atomically advances a completed target queue and restores its position after restart', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'livewall-queue-complete-'));
+    const store = new StateStore(directory);
+    await store.load();
+    const first = newTile('First', {
+      type: 'mock',
+      url: 'https://mock.livewall.local/?label=first',
+    });
+    const second = newTile('Second', {
+      type: 'mock',
+      url: 'https://mock.livewall.local/?label=second',
+    });
+    const queued = insertQueueSource(
+      { ...emptyState(), tiles: [first, second] },
+      first.id,
+      { type: 'mock', url: 'https://mock.livewall.local/?label=next' },
+      'Next',
+      'append',
+    );
+    await store.replace(queued);
+    await store.advanceQueueOnCompletion(first.id, first.source.url);
+    expect(store.get().tiles[0]).toMatchObject({
+      source: { url: 'https://mock.livewall.local/?label=next' },
+      queuePosition: 1,
+    });
+    expect(store.get().tiles[1]).toMatchObject({
+      id: second.id,
+      source: second.source,
+      volume: second.volume,
+    });
+    const reopened = new StateStore(directory);
+    await reopened.load();
+    expect(reopened.get().tiles[0].queuePosition).toBe(1);
+    expect(reopened.get().tiles[0].source.url).toContain('next');
+  });
+
   it('atomically migrates the actual pre-P1 fixture and reopens it successfully', async () => {
     const directory = await mkdtemp(path.join(tmpdir(), 'livewall-reopen-'));
     const file = path.join(directory, 'wall-state.json');
@@ -158,7 +194,11 @@ describe('StateStore', () => {
       exportedAt: 1,
       library: incoming,
     });
-    expect(result.state.tiles).toEqual([tile]);
+    expect(result.state.tiles[0]).toMatchObject({
+      id: tile.id,
+      source: tile.source,
+      queuePosition: 0,
+    });
     expect(result.state.library.entries[0].title).toBe('Imported');
     expect(await readFile(result.backupPath, 'utf8')).toContain('Existing');
   });

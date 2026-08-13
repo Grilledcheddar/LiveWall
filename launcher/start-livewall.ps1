@@ -47,8 +47,8 @@ try {
       $screen.Bounds.X, $screen.Bounds.Y, $screen.Bounds.Width, $screen.Bounds.Height,
       $screen.WorkingArea.X, $screen.WorkingArea.Y, $screen.WorkingArea.Width, $screen.WorkingArea.Height)
   }
-  $wallSelection = Select-LiveWallDisplay -Screens $screens -RequestedDeviceName ([string]$config.wallDisplay)
-  $adminSelection = Select-LiveWallDisplay -Screens $screens -RequestedDeviceName ([string]$config.adminDisplay)
+  $wallSelection = Resolve-LiveWallRoleDisplay -Screens $screens -RequestedDeviceName ([string]$config.wallDisplay) -Role 'wall'
+  $adminSelection = Resolve-LiveWallRoleDisplay -Screens $screens -RequestedDeviceName ([string]$config.adminDisplay) -Role 'admin'
   if ($wallSelection.FallbackUsed) {
     Write-Warning "Wall display $($config.wallDisplay) is unavailable; using $($wallSelection.Screen.DeviceName)."
   }
